@@ -2,7 +2,6 @@ name: Build & Push Docker Images
 
 on:
   push:
-    branches: [main]
     tags: ["v*"]          # e.g. v1.0.0 → tagged release
   workflow_dispatch:      # allow manual trigger from GitHub UI
 
@@ -39,15 +38,15 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       # Determine image tags:
-      #   push to main  → :latest  + :<short-sha>
-      #   push tag v*   → :v1.0.0  + :latest
+      #   push tag v*        → :v1.0.0 + :1.0 + :latest
+      #   workflow_dispatch  → :latest + :<short-sha>
       - name: Extract metadata (tags & labels)
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env[matrix.image_env] }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest
             type=sha,prefix=,format=short
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
