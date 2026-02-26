@@ -1,0 +1,13 @@
+# Local development override — builds images from source instead of pulling.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+services:
+  indexer:
+    build:
+      context: .
+      dockerfile: indexer/Dockerfile
+
+  mcp:
+    build:
+      context: .
+      dockerfile: mcpserver/Dockerfile

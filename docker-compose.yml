@@ -1,0 +1,58 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    # Qdrant는 외부에 노출하지 않음 — rag-net 내부에서만 접근
+    expose:
+      - "6333"
+    environment:
+      - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY:-}
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - rag-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:6333/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  indexer:
+    image: sjw0066/rag-indexer:${IMAGE_TAG:-latest}
+    env_file: .env
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+    ports:
+      - "17000:8000"   # host:container
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    networks:
+      - rag-net
+    depends_on:
+      qdrant:
+        condition: service_healthy
+
+  mcp:
+    image: sjw0066/rag-mcp:${IMAGE_TAG:-latest}
+    env_file: .env
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+      - MCP_TRANSPORT=sse
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8080
+    ports:
+      - "17080:8080"   # host:container
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    networks:
+      - rag-net
+    depends_on:
+      qdrant:
+        condition: service_healthy
+
+networks:
+  rag-net:
+    driver: bridge
+
+volumes:
+  qdrant_data:
+  hf_cache:
