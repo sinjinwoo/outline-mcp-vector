@@ -17,6 +17,13 @@ networks:
     external: false
 
 services:
+  qdrant:
+    # Published to the host (base compose only does `expose`) so ad-hoc dev
+    # scripts — e.g. scripts/ab_test_embedding_prefix.py — can reach it at
+    # localhost:6333 without going through the app container.
+    ports:
+      - "6333:6333"
+
   redis:
     image: redis:7-alpine
     networks:

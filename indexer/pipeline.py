@@ -22,7 +22,7 @@ def index_document(doc: Document) -> None:
         print(f"[pipeline] Deleted vectors (empty doc): {doc.title} ({doc.doc_id})")
         return
 
-    embeddings = embed_passages(chunks)
+    embeddings = embed_passages(chunks, title=doc.title)
 
     delete_by_doc_id(doc.doc_id)
 
