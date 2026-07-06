@@ -1,3 +1,8 @@
+[![License](https://img.shields.io/github/license/sinjinwoo/outlineMcp.svg)](LICENSE)
+[![CI](https://github.com/sinjinwoo/outlineMcp/actions/workflows/ci.yml/badge.svg)](https://github.com/sinjinwoo/outlineMcp/actions/workflows/ci.yml)
+[![Build](https://github.com/sinjinwoo/outlineMcp/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/sinjinwoo/outlineMcp/actions/workflows/docker-publish.yml)
+[![Docker Pulls](https://img.shields.io/docker/pulls/sjw0066/outline-mcp-vector.svg)](https://hub.docker.com/r/sjw0066/outline-mcp-vector)
+[![Docker Image Version](https://img.shields.io/docker/v/sjw0066/outline-mcp-vector?sort=semver&label=version)](https://hub.docker.com/r/sjw0066/outline-mcp-vector/tags)
 
 # 🚀 Outline RAG MCP Server
 
