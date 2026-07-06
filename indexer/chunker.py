@@ -31,8 +31,18 @@ def chunk_markdown(text: str) -> list[str]:
 
 
 def _split_by_headers(text: str) -> list[str]:
-    """Partition text at every H1/H2/H3 boundary."""
-    boundaries = [m.start() for m in _HEADER_RE.finditer(text)]
+    """Partition text at every H1/H2/H3 boundary.
+
+    Header-like lines inside fenced code blocks (```...```) are ignored so
+    code blocks are never split apart (e.g. a Python "# comment" or a
+    Markdown snippet must not be treated as a heading).
+    """
+    boundaries: list[int] = []
+    for m in _HEADER_RE.finditer(text):
+        fences_before = text.count("```", 0, m.start())
+        if fences_before % 2 == 0:  # even → not inside an open code fence
+            boundaries.append(m.start())
+
     if not boundaries:
         return [text]
 
