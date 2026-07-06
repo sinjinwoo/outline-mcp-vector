@@ -1,0 +1,46 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    expose:
+      - "6333"
+    environment:
+      - QDRANT__SERVICE__API_KEY
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - rag-net
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo -e \"GET /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" > /dev/tcp/localhost/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  outline-mcp-vector:
+    image: sjw0066/outline-mcp-vector:latest
+    env_file: .env
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+      - REDIS_URL=redis://redis:6379/1 # Outline의 Redis 컨테이너를 함께 공유 (DB 1번 사용)
+      - MCP_HOST=0.0.0.0
+      - MCP_PORT=8080
+    ports:
+      - "17000:8000"   # FastAPI 포트 (Webhook, Sync 수신)
+      - "17080:8080"   # FastMCP SSE 포트
+    volumes:
+      - sync_state:/data
+    networks:
+      - rag-net
+      - outline-net    # Outline의 기존 대역에 합류
+    depends_on:
+      qdrant:
+        condition: service_healthy
+
+networks:
+  rag-net:
+    driver: bridge
+  outline-net:
+    external: true     # 이미 구동 중인 Outline 네트워크를 참조
+
+volumes:
+  qdrant_data:
+  sync_state:

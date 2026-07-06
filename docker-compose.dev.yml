@@ -1,0 +1,41 @@
+# Local development override — builds the image from source instead of
+# pulling, and assumes there's NO local Outline stack to join:
+#   - outline-mcp-vector connects to the already-deployed Outline over its public
+#     URL (.env's OUTLINE_BASE_URL) — outline-net is dropped, and
+#     OUTLINE_API_URL is cleared so it can't accidentally point at an
+#     unreachable internal hostname.
+#   - Redis is its own local container instead of Outline's shared one,
+#     since there's no outline-net to reach it through.
+#
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+# Base compose declares outline-net as `external: true`, which Compose
+# validates on every `up` even for services that don't join it. Override it
+# to a plain local network so dev doesn't need a real Outline stack running.
+networks:
+  outline-net:
+    external: false
+
+services:
+  redis:
+    image: redis:7-alpine
+    networks:
+      - rag-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  outline-mcp-vector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - OUTLINE_API_URL=
+    networks:
+      - rag-net
+    depends_on:
+      redis:
+        condition: service_healthy
