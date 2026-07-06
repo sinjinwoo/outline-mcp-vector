@@ -1,6 +1,3 @@
-지금까지 정리된 모든 내용(홈서버 HTTPS 기본 배포 환경, 17080 포트 분리 구조, Nginx 프록시 버퍼링 설정, Outline 사전 발급 순서 등)을 완벽하게 반영하여 그대로 복사 붙여넣기(Ctrl+C, Ctrl+V)해서 사용할 수 있는 최종 리드미(README.md)를 완성했습니다.
-
----
 
 # 🚀 Outline RAG MCP Server
 
