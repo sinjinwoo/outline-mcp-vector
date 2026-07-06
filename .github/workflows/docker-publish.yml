@@ -1,4 +1,4 @@
-name: Build & Push Docker Images
+name: Build & Push Docker Image
 
 on:
   push:
@@ -7,22 +7,11 @@ on:
 
 env:
   # Set your Docker Hub username in repo Settings → Secrets → DOCKERHUB_USERNAME
-  INDEXER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/rag-indexer
-  MCP_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/rag-mcp
+  IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/rag-server
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - service: indexer
-            dockerfile: indexer/Dockerfile
-            image_env: INDEXER_IMAGE
-          - service: mcp
-            dockerfile: mcpserver/Dockerfile
-            image_env: MCP_IMAGE
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,22 +33,22 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env[matrix.image_env] }}
+          images: ${{ env.IMAGE }}
           tags: |
             type=raw,value=latest
             type=sha,prefix=,format=short
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
-      - name: Build and push ${{ matrix.service }}
+      - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ${{ matrix.dockerfile }}
+          file: Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # Cache layers in GitHub Actions cache for faster rebuilds
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          cache-from: type=gha,scope=rag-server
+          cache-to: type=gha,mode=max,scope=rag-server

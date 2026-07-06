@@ -15,6 +15,10 @@ mcp = FastMCP(
         "Search the team knowledge base built from Outline documents. "
         "Use search_knowledge to find relevant pages by semantic meaning."
     ),
+    # host/port only take effect for the sse transport; FastMCP.run() itself
+    # doesn't accept them — they must be set here in the constructor.
+    host=os.getenv("MCP_HOST", "0.0.0.0"),
+    port=int(os.getenv("MCP_PORT", "8080")),
 )
 
 
@@ -37,10 +41,4 @@ async def search_knowledge(query: str, limit: int = 5) -> list[dict]:
 
 if __name__ == "__main__":
     transport = os.getenv("MCP_TRANSPORT", "sse")
-    host = os.getenv("MCP_HOST", "0.0.0.0")
-    port = int(os.getenv("MCP_PORT", "8080"))
-
-    if transport == "sse":
-        mcp.run(transport="sse", host=host, port=port)
-    else:
-        mcp.run(transport="stdio")
+    mcp.run(transport=transport)

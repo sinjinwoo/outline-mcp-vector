@@ -5,93 +5,45 @@ services:
     expose:
       - "6333"
     environment:
-      - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY:-}
+      # Bare name (no "=default") so this var is entirely absent from the
+      # container when unset in .env — Qdrant then runs with no auth at all.
+      # `=${...:-}` would instead set an empty string, which paradoxically
+      # makes Qdrant *require* an (empty) api-key header while our client
+      # skips sending one for an empty key, and every request 401s.
+      - QDRANT__SERVICE__API_KEY
     volumes:
       - qdrant_data:/qdrant/storage
     networks:
       - rag-net
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:6333/healthz || exit 1"]
+      # qdrant's image doesn't ship curl/wget — use bash's /dev/tcp instead.
+      test: ["CMD-SHELL", "bash -c 'echo -e \"GET /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" > /dev/tcp/localhost/6333' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  redis:
-    image: redis:7-alpine
-    # Celery 브로커 + 동기화 락 전용 — Outline과는 별도 인스턴스
-    command: ["redis-server", "--appendonly", "yes"]
-    expose:
-      - "6379"
-    volumes:
-      - redis_data:/data
-    networks:
-      - rag-net
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  indexer:
-    image: sjw0066/rag-indexer:${IMAGE_TAG:-latest}
+  rag-server:
+    # 단일 컨테이너: Supervisor가 FastAPI(webhook/sync/health) + Celery Worker +
+    # Celery Beat + MCP 서버를 함께 관리한다 (설계문서 13번 섹션).
+    # Outline이 이미 떠 있는 outline-net에 합류해 내부 호스트명(outline, redis)으로
+    # 직접 통신 — Outline의 기존 Redis를 그대로 재사용하고(별도 논리 DB), 별도
+    # redis 컨테이너는 두지 않는다.
+    image: sjw0066/rag-server:${IMAGE_TAG:-latest}
     env_file: .env
     environment:
       - QDRANT_URL=http://qdrant:6333
       - REDIS_URL=redis://redis:6379/1
-    ports:
-      - "17000:8000"   # host:container
-    networks:
-      - rag-net
-    depends_on:
-      qdrant:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  worker:
-    # Celery 워커: 웹훅 이벤트 처리와 동기화 실행을 전담 (API 프로세스와 분리)
-    image: sjw0066/rag-indexer:${IMAGE_TAG:-latest}
-    command: ["celery", "-A", "indexer.celery_app", "worker", "--loglevel=info"]
-    env_file: .env
-    environment:
-      - QDRANT_URL=http://qdrant:6333
-      - REDIS_URL=redis://redis:6379/1
-    volumes:
-      - sync_state:/data
-    networks:
-      - rag-net
-    depends_on:
-      qdrant:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-
-  beat:
-    # 주기적 동기화 스케줄러 (기본 1시간 간격, SYNC_INTERVAL_SECONDS로 조정)
-    image: sjw0066/rag-indexer:${IMAGE_TAG:-latest}
-    command: ["celery", "-A", "indexer.celery_app", "beat", "--loglevel=info"]
-    env_file: .env
-    environment:
-      - QDRANT_URL=http://qdrant:6333
-      - REDIS_URL=redis://redis:6379/1
-    networks:
-      - rag-net
-    depends_on:
-      redis:
-        condition: service_healthy
-
-  mcp:
-    image: sjw0066/rag-mcp:${IMAGE_TAG:-latest}
-    env_file: .env
-    environment:
-      - QDRANT_URL=http://qdrant:6333
       - MCP_TRANSPORT=sse
       - MCP_HOST=0.0.0.0
       - MCP_PORT=8080
     ports:
-      - "17080:8080"   # host:container
+      - "17000:8000"   # FastAPI: webhook + sync + health
+      - "17080:8080"   # MCP SSE
+    volumes:
+      - sync_state:/data
     networks:
       - rag-net
+      - outline-net
     depends_on:
       qdrant:
         condition: service_healthy
@@ -99,8 +51,11 @@ services:
 networks:
   rag-net:
     driver: bridge
+  outline-net:
+    # docker-compose.outline.yml에서 정의한 네트워크에 합류 (Outline 스택이
+    # 먼저 떠 있어야 함). 재사용할 Redis, 그리고 outline 컨테이너 자체가 여기 있음.
+    external: true
 
 volumes:
   qdrant_data:
   sync_state:
-  redis_data:

@@ -9,8 +9,17 @@ _PAGE_LIMIT = 25  # Outline API max per page
 
 
 class OutlineConnector(Connector):
-    def __init__(self, base_url: str, api_key: str):
+    def __init__(self, base_url: str, api_key: str, public_url: str | None = None):
+        """
+        base_url: used for actual API calls. When the connector runs on the
+            same Docker network as Outline, this can be an internal hostname
+            (e.g. http://outline:3000) to skip the public round-trip.
+        public_url: used to build the doc URLs shown in search results,
+            which must stay externally clickable. Defaults to base_url when
+            not co-located with Outline (the common case).
+        """
         self.base_url = base_url.rstrip("/")
+        self.public_url = (public_url or base_url).rstrip("/")
         self.headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -20,7 +29,7 @@ class OutlineConnector(Connector):
     def _parse_document(self, data: dict) -> Document:
         url = data.get("url", "")
         if url and not url.startswith("http"):
-            url = f"{self.base_url}{url}"
+            url = f"{self.public_url}{url}"
 
         updated_at = None
         if data.get("updatedAt"):

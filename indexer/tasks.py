@@ -16,7 +16,13 @@ from indexer.sync_lock import acquire_sync_lock, doc_lock, release_sync_lock
 from shared.sync_state import get_last_synced_at, set_last_synced_at
 from shared.vector_store import get_all_doc_ids
 
-OUTLINE_BASE_URL = os.getenv("OUTLINE_BASE_URL", "")
+# OUTLINE_API_URL: used for actual API calls — set to the internal Docker
+# hostname (e.g. http://outline:3000) when co-located on Outline's network
+# to skip the public round-trip. Falls back to OUTLINE_BASE_URL when unset.
+OUTLINE_API_URL = os.getenv("OUTLINE_API_URL") or os.getenv("OUTLINE_BASE_URL", "")
+# OUTLINE_PUBLIC_URL: used to build the doc URLs shown in search results,
+# which must stay externally clickable regardless of OUTLINE_API_URL.
+OUTLINE_PUBLIC_URL = os.getenv("OUTLINE_PUBLIC_URL") or os.getenv("OUTLINE_BASE_URL", "")
 OUTLINE_API_KEY = os.getenv("OUTLINE_API_KEY", "")
 
 INDEX_EVENTS = {"documents.create", "documents.update", "documents.publish"}
@@ -24,7 +30,11 @@ DELETE_EVENTS = {"documents.delete", "documents.archive"}
 
 
 def _connector() -> OutlineConnector:
-    return OutlineConnector(base_url=OUTLINE_BASE_URL, api_key=OUTLINE_API_KEY)
+    return OutlineConnector(
+        base_url=OUTLINE_API_URL,
+        api_key=OUTLINE_API_KEY,
+        public_url=OUTLINE_PUBLIC_URL,
+    )
 
 
 @celery_app.task(name="indexer.process_webhook_event", max_retries=3, default_retry_delay=30)

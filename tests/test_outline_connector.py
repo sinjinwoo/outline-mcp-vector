@@ -55,3 +55,26 @@ def test_parse_document_handles_missing_updated_at():
     doc = connector._parse_document(make_raw_doc(updatedAt=None))
 
     assert doc.updated_at is None
+
+
+def test_public_url_defaults_to_base_url_when_not_set():
+    connector = OutlineConnector(base_url="https://outline.example.com", api_key="key")
+
+    assert connector.public_url == "https://outline.example.com"
+
+
+def test_relative_doc_links_use_public_url_not_the_internal_api_url():
+    # Regression test: when co-located on Outline's docker network,
+    # base_url may be an internal-only hostname (http://outline:3000) used
+    # for API calls. Doc URLs shown in search results must still use the
+    # externally-clickable public_url, or every link becomes unreachable.
+    connector = OutlineConnector(
+        base_url="http://outline:3000",
+        api_key="key",
+        public_url="https://outline.example.com",
+    )
+
+    doc = connector._parse_document(make_raw_doc(url="/doc/test-doc"))
+
+    assert doc.url == "https://outline.example.com/doc/test-doc"
+    assert connector.base_url == "http://outline:3000"

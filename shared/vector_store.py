@@ -12,7 +12,10 @@ from qdrant_client.models import (
 )
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")  # None → no auth (local dev)
+# Same variable name Qdrant itself uses to set this key server-side
+# (service.api_key -> QDRANT__SERVICE__API_KEY) — kept identical here so
+# there's only one name for this secret across the whole stack.
+QDRANT_API_KEY = os.getenv("QDRANT__SERVICE__API_KEY")  # None → no auth (local dev)
 COLLECTION_NAME = "documents"
 
 _client: QdrantClient | None = None
