@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Outline → RAG → MCP: a service that watches a self-hosted [Outline](https://www.getoutline.com/) wiki, embeds its documents with Gemini, stores vectors in Qdrant, and exposes a `search_knowledge` MCP tool for AI agents. Ships as a single Docker image (`rag-server`).
+Outline → RAG → MCP: a service that watches a self-hosted [Outline](https://www.getoutline.com/) wiki, embeds its documents with Gemini, stores vectors in Qdrant, and exposes a `search_knowledge` MCP tool for AI agents. Ships as a single Docker image (`outline-mcp-vector`).
 
 `createplan.md` is the original Korean design doc — useful for intent/rationale, but the code has moved on in places (it says HuggingFace/pluggable providers and `EMBEDDING_PROVIDER`; the real implementation is Gemini-only). Trust the code and `README.md`/`CONTRIBUTING.md` over `createplan.md` when they disagree.
 
@@ -22,7 +22,7 @@ python -m pytest tests/test_chunker.py -v
 python -m pytest tests/test_tasks.py::test_run_sync_skips_documents_not_changed_since_cursor -v
 
 # Build the single image locally
-docker build -t rag-server .
+docker build -t outline-mcp-vector .
 
 # Run the full stack from source (assumes a real Outline instance reachable
 # via OUTLINE_BASE_URL in .env; spins up its own dev-only Redis — see
@@ -40,7 +40,7 @@ curl http://localhost:17000/health
 
 ### One image, four supervised processes
 
-Everything ships as one Docker image built from the root `Dockerfile`. `supervisord.conf` runs four processes inside a single `rag-server` container:
+Everything ships as one Docker image built from the root `Dockerfile`. `supervisord.conf` runs four processes inside a single `outline-mcp-vector` container:
 
 | Process | Entrypoint | Role |
 |---|---|---|
@@ -83,7 +83,7 @@ Three triggers all enqueue the same `run_sync` Celery task: FastAPI startup (`li
 
 ### Networking: Outline network/Redis reuse
 
-Production `docker-compose.yml` assumes `rag-server` joins Outline's own Docker network (external network `outline-net`) and reuses Outline's existing Redis on a separate logical DB (`REDIS_URL=redis://redis:6379/1`) — there is intentionally no dedicated Redis container in prod. `docker-compose.dev.yml` overrides this for local dev (no real Outline network available): it neutralizes `outline-net`'s `external: true`, spins up a standalone dev Redis, and clears `OUTLINE_API_URL` so calls fall back to the public `OUTLINE_BASE_URL`.
+Production `docker-compose.yml` assumes `outline-mcp-vector` joins Outline's own Docker network (external network `outline-net`) and reuses Outline's existing Redis on a separate logical DB (`REDIS_URL=redis://redis:6379/1`) — there is intentionally no dedicated Redis container in prod. `docker-compose.dev.yml` overrides this for local dev (no real Outline network available): it neutralizes `outline-net`'s `external: true`, spins up a standalone dev Redis, and clears `OUTLINE_API_URL` so calls fall back to the public `OUTLINE_BASE_URL`.
 
 This is why `connector/outline.py`'s `OutlineConnector` has two URLs, not one:
 - `base_url` (`OUTLINE_API_URL`, falls back to `OUTLINE_BASE_URL`) — used for actual API calls; can be the internal hostname (`http://outline:3000`) when co-located.

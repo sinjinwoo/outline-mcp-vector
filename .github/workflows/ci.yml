@@ -1,0 +1,24 @@
+name: CI
+
+# 배포용 docker-publish.yml과는 별개 - PR/push마다 테스트를 돌려서 코드가 깨지지 않았는지 확인한다.
+# 외부 의존성(Redis/Qdrant/Outline/Gemini)은 전부 테스트에서 모킹되므로 서비스 컨테이너가 필요 없다.
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-test.txt
+
+      - name: Run tests
+        run: python -m pytest tests/ -v
