@@ -101,7 +101,7 @@ This is why `connector/outline.py`'s `OutlineConnector` has two URLs, not one:
 
 Every external dependency is mocked — tests never need a running Redis/Qdrant/Outline/Gemini:
 - Redis-backed locks (`indexer/sync_lock.py`) are tested against `fakeredis` (needs the `[lua]` extra installed for `redis.Redis.lock()`'s release script to work).
-- `google.generativeai` is faked by injecting a stand-in module into `sys.modules` before importing `GeminiProvider` (see `tests/test_embedder_gemini.py`).
+- `google.genai`/`google.genai.types` are faked by injecting stand-in modules into `sys.modules` before importing `GeminiProvider` (see `tests/test_embedder_gemini.py`).
 - Celery tasks are tested by calling the task object directly (`tasks_module.run_sync(full=False)`), not `.delay()` — this runs the task body synchronously in-process with no broker needed.
 
 See `CONTRIBUTING.md` for branch/commit conventions, the PR checklist, and how to add a new embedding provider if `GeminiProvider` ever needs a sibling. See `docs/troubleshooting/` for write-ups of real bugs found in this codebase (template at `docs/troubleshooting/template.md`).

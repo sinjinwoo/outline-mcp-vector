@@ -4,15 +4,34 @@ GOOGLE_API_KEYS      - required, comma-separated pool (key1,key2,key3)
                        falls back to GEMINI_API_KEY for a single key
 GEMINI_EMBEDDING_DIM - default: 3072 (output_dimensionality)
 
-Always uses the gemini-embedding-002 model — there's no other provider or
-model to choose, so it isn't configurable.
+Always uses the gemini-embedding-2 model — there's no other provider or model
+to choose, so it isn't configurable.
+
+Uses the `google-genai` SDK, not the deprecated `google.generativeai` package
+(support for that one ended and gemini-embedding-* isn't served on its v1beta
+API anymore — every call 404s regardless of key).
+
+gemini-embedding-2 takes task instructions as a text prefix baked into the
+input itself rather than an API parameter (see Google's asymmetric-retrieval
+guidance for this model) — _prepare_query/_prepare_document below. Because
+it's asymmetric, a query embedding is only meaningfully comparable against
+document embeddings that went through _prepare_document; the two prefixes
+must not be swapped or dropped.
 """
 
 import itertools
 import os
 
-_MODEL_PATH = "models/gemini-embedding-002"
-_DEFAULT_DIMENSION = 3072  # gemini-embedding-002 native output size
+_MODEL = "gemini-embedding-2"
+_DEFAULT_DIMENSION = 3072
+
+
+def _prepare_query(text: str) -> str:
+    return f"task: search result | query: {text}"
+
+
+def _prepare_document(text: str, title: str | None) -> str:
+    return f"title: {title or 'none'} | text: {text}"
 
 
 class GeminiProvider:
@@ -25,7 +44,8 @@ class GeminiProvider:
     """
 
     def __init__(self) -> None:
-        import google.generativeai as genai
+        from google import genai
+        from google.genai import types
 
         raw_keys = os.getenv("GOOGLE_API_KEYS") or os.getenv("GEMINI_API_KEY", "")
         keys = [k.strip() for k in raw_keys.split(",") if k.strip()]
@@ -35,12 +55,15 @@ class GeminiProvider:
                 "for the Gemini embedding provider"
             )
 
-        self._genai = genai
-        self._keys = keys
+        self._types = types
+        # google-genai is client-based (no global genai.configure()), so each
+        # key gets its own Client up front instead of reconfiguring a
+        # module-level singleton before every call.
+        self._clients = [genai.Client(api_key=key) for key in keys]
         self._key_cycle = itertools.cycle(range(len(keys)))
         self._dimension = int(os.getenv("GEMINI_EMBEDDING_DIM", str(_DEFAULT_DIMENSION)))
         print(
-            f"[embedder] Using Gemini embedding model: {_MODEL_PATH} "
+            f"[embedder] Using Gemini embedding model: {_MODEL} "
             f"(dim={self._dimension}, {len(keys)} API key(s) in pool)"
         )
 
@@ -48,17 +71,16 @@ class GeminiProvider:
         return self._dimension
 
     def _call_with_key_rotation(self, make_request):
-        """Try `make_request()` once per key, rotating on failure.
+        """Try `make_request(client)` once per key, rotating on failure.
 
         Each key is attempted at most once per call. Raises the last
         error once every key in the pool has failed.
         """
         last_exc: Exception | None = None
-        for _ in range(len(self._keys)):
+        for _ in range(len(self._clients)):
             key_index = next(self._key_cycle)
-            self._genai.configure(api_key=self._keys[key_index])
             try:
-                return make_request()
+                return make_request(self._clients[key_index])
             except Exception as exc:
                 last_exc = exc
                 is_rate_limit = "429" in str(exc) or "quota" in str(exc).lower()
@@ -67,26 +89,25 @@ class GeminiProvider:
                     f"{' (rate limited)' if is_rate_limit else ''}, "
                     f"rotating to next key: {exc}"
                 )
-        raise RuntimeError(f"All {len(self._keys)} Gemini API key(s) failed") from last_exc
+        raise RuntimeError(f"All {len(self._clients)} Gemini API key(s) failed") from last_exc
 
-    def _embed_one(self, text: str, task_type: str) -> list[float]:
-        def make_request():
-            result = self._genai.embed_content(
-                model=_MODEL_PATH,
-                content=text,
-                task_type=task_type,
-                output_dimensionality=self._dimension,
+    def _embed_one(self, text: str) -> list[float]:
+        def make_request(client):
+            result = client.models.embed_content(
+                model=_MODEL,
+                contents=text,
+                config=self._types.EmbedContentConfig(output_dimensionality=self._dimension),
             )
-            return result["embedding"]
+            return result.embeddings[0].values
 
         return self._call_with_key_rotation(make_request)
 
     def embed_query(self, text: str) -> list[float]:
-        return self._embed_one(text, "RETRIEVAL_QUERY")
+        return self._embed_one(_prepare_query(text))
 
-    def embed_passages(self, texts: list[str]) -> list[list[float]]:
+    def embed_passages(self, texts: list[str], title: str | None = None) -> list[list[float]]:
         # Gemini embed_content handles one text at a time; batch with a loop
-        return [self._embed_one(text, "RETRIEVAL_DOCUMENT") for text in texts]
+        return [self._embed_one(_prepare_document(text, title)) for text in texts]
 
 
 # ---------------------------------------------------------------------------
@@ -115,5 +136,5 @@ def embed_query(text: str) -> list[float]:
     return _get_provider().embed_query(text)
 
 
-def embed_passages(texts: list[str]) -> list[list[float]]:
-    return _get_provider().embed_passages(texts)
+def embed_passages(texts: list[str], title: str | None = None) -> list[list[float]]:
+    return _get_provider().embed_passages(texts, title)

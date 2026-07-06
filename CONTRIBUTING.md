@@ -74,7 +74,7 @@ outline-rag-mcp/
 - 단일 Docker 이미지(`outline-mcp-vector`)로 배포
 - Supervisor가 FastAPI, Celery Worker, Celery Beat, MCP Server를 관리
 - Outline Webhook 기반 증분 동기화
-- Gemini(`gemini-embedding-002`) 고정
+- Gemini(`gemini-embedding-2`) 고정
 - Qdrant 기반 벡터 검색
 
 ---
