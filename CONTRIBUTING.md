@@ -1,64 +1,68 @@
+🌐 **Language**: **English** | [한국어](CONTRIBUTING.ko.md)
+
+---
+
 # Contributing
 
-## 브랜치 전략
+## Branch Strategy
 
-모든 작업은 `main`에서 브랜치를 생성하여 PR로 병합합니다.
+All work branches off `main` and merges back via PR.
 
-브랜치 이름 형식
+Branch name format
 
 ```
 <type>/<slug>
 ```
 
-| Type | 설명 | 예시 |
+| Type | Description | Example |
 |------|------|------|
-| feat | 기능 추가 | `feat/gemini-key-pool` |
-| fix | 버그 수정 | `fix/chunker-code-block` |
-| docs | 문서 수정 | `docs/readme` |
-| refactor | 리팩터링 | `refactor/embedder` |
-| test | 테스트 | `test/chunker` |
+| feat | New feature | `feat/gemini-key-pool` |
+| fix | Bug fix | `fix/chunker-code-block` |
+| docs | Docs change | `docs/readme` |
+| refactor | Refactor | `refactor/embedder` |
+| test | Tests | `test/chunker` |
 | ci | CI/CD | `ci/docker-publish` |
-| chore | 기타 작업 | `chore/dependencies` |
+| chore | Misc | `chore/dependencies` |
 
-하나의 브랜치에는 하나의 논리적인 변경만 포함하는 것을 권장합니다.
+Keep each branch to a single logical change.
 
 ---
 
-## 커밋 메시지
+## Commit Messages
 
-[Conventional Commits](https://www.conventionalcommits.org/) 형식을 사용합니다.
+Uses the [Conventional Commits](https://www.conventionalcommits.org/) format.
 
 ```
 <type>: <description>
 ```
 
-예시
+Examples
 
 ```
-feat: Gemini 다중 API 키 순환 지원
-fix: 코드 블록이 잘못 분리되는 문제 수정
-docs: README 설치 방법 개선
+feat: support round-robin Gemini API key pool
+fix: fix code blocks being split incorrectly
+docs: improve README install instructions
 ```
 
 ---
 
-## Pull Request
+## Pull Requests
 
-PR 전 아래 항목을 확인해주세요.
+Please check the following before opening a PR.
 
-- [ ] 테스트 통과 (`pytest`)
-- [ ] Docker 이미지 빌드 및 실행 확인
-- [ ] 새로운 환경변수를 추가했다면 `.env.example`과 `README.md` 반영
-- [ ] 기존 도구(Outline, Qdrant 등)의 환경변수 이름을 그대로 사용할 수 있는지 검토
+- [ ] Tests pass (`pytest`)
+- [ ] Docker image builds and runs
+- [ ] If you added a new env var, reflect it in `.env.example` and `README.md`
+- [ ] Check whether you can reuse an existing tool's (Outline, Qdrant, etc.) env var name as-is
 
 ---
 
-## 프로젝트 구조
+## Project Structure
 
 ```
 outline-rag-mcp/
 ├── connector/      # Outline API
-├── shared/         # Gemini, Qdrant, 공통 모듈
+├── shared/         # Gemini, Qdrant, shared modules
 ├── indexer/        # Webhook / Sync / Celery
 ├── mcpserver/      # MCP Server
 ├── tests/
@@ -69,17 +73,17 @@ outline-rag-mcp/
 
 ---
 
-## 설계 원칙
+## Design Principles
 
-- 단일 Docker 이미지(`outline-mcp-vector`)로 배포
-- Supervisor가 FastAPI, Celery Worker, Celery Beat, MCP Server를 관리
-- Outline Webhook 기반 증분 동기화
-- Gemini(`gemini-embedding-2`) 고정
-- Qdrant 기반 벡터 검색
+- Ships as a single Docker image (`outline-mcp-vector`)
+- Supervisor manages FastAPI, Celery Worker, Celery Beat, and the MCP Server
+- Incremental sync driven by Outline webhooks
+- Gemini (`gemini-embedding-2`) fixed
+- Qdrant-based vector search
 
 ---
 
-## 테스트
+## Testing
 
 ```bash
 pip install -r requirements.txt -r requirements-test.txt
@@ -87,29 +91,28 @@ pip install -r requirements.txt -r requirements-test.txt
 pytest
 ```
 
-외부 서비스는 모두 Mock으로 대체되어 Redis, Outline, Gemini, Qdrant 없이 실행할 수 있습니다.
+Every external service is mocked, so this runs without Redis, Outline, Gemini, or Qdrant.
 
 ---
-## 개발환경
+## Dev Environment
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 
 ```
 
 ---
-## 트러블슈팅
+## Troubleshooting
 
-버그 해결 과정이나 운영 중 발생한 이슈는
+Write up bugs and production incidents in
 
 ```
 docs/troubleshooting/
 ```
 
-에 추가합니다.
 
-가능하면 다음 순서로 작성합니다.
+Prefer this order when writing one up:
 
-- 문제
-- 원인
-- 해결 방법
-- 배운 점
+- Problem
+- Cause
+- Fix
+- Lessons learned

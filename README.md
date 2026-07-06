@@ -4,67 +4,71 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/sjw0066/outline-mcp-vector.svg)](https://hub.docker.com/r/sjw0066/outline-mcp-vector)
 [![Docker Image Version](https://img.shields.io/docker/v/sjw0066/outline-mcp-vector?sort=semver&label=version)](https://hub.docker.com/r/sjw0066/outline-mcp-vector/tags)
 
+🌐 **Language**: **English** | [한국어](README.ko.md)
+
+---
+
 # 🚀 Outline RAG MCP Server
 
-Outline 위키의 문서들을 자동으로 벡터화하여, AI 에이전트(Claude Desktop 등)가 **의미 기반 자연어 검색**을 할 수 있도록 지원하는 RAG(Retrieval-Augmented Generation) + MCP(Model Context Protocol) 서버입니다.
+A RAG (Retrieval-Augmented Generation) + MCP (Model Context Protocol) server that automatically vectorizes the documents in your Outline wiki, so AI agents (Claude Desktop, etc.) can run **semantic natural-language search** over them.
 
-셀프 호스팅 중인 Outline Stack의 **기존 Redis를 공유하여 사용**하므로, 리소스를 낭비하지 않고 **Docker Compose 파일 하나로 즉시 연동**됩니다.
-
----
-
-## ✨ 핵심 특징
-
-* **단일 컨테이너 배포 (`outline-mcp-vector`)**: FastAPI, Celery (Worker/Beat), MCP 서버가 컨테이너 하나로 구동되어 관리가 편리합니다.
-* **인프라 자원 최적화**: Outline이 이미 사용 중인 Redis 컨테이너를 함께 공유하되, 논리 디비(`db/1`)를 분리하여 격리된 큐를 구성합니다.
-* **지능형 증분 동기화**: 실시간 웹훅(Webhook)과 주기적(기본 1시간) 스케줄러가 협업하여 `updated_at` 기준 변경·삭제된 문서만 스마트하게 추적 반영합니다.
-* **Gemini Key Pool**: 여러 개의 Gemini API 키를 등록하면 라운드 로빈 방식으로 호출하며, Rate Limit(429) 발생 시 자동 Failover를 수행합니다.
-* **MCP 토큰 인증**: MCP 서버(SSE)는 `MCP_AUTH_TOKENS`에 등록된 토큰이 없으면 아예 기동되지 않으며, 등록되지 않은 토큰으로의 요청은 모두 401로 거부됩니다. URL만 알아도 아무나 지식베이스를 검색할 수 없도록 막는 장치입니다.
+It **shares your self-hosted Outline stack's existing Redis** instead of spinning up its own, so it drops in with **a single Docker Compose file** and no wasted resources.
 
 ---
 
-## 🛠 아키텍처
+## ✨ Key Features
+
+* **Single-container deployment (`outline-mcp-vector`)**: FastAPI, Celery (Worker/Beat), and the MCP server all run in one container, which keeps operations simple.
+* **Infra-efficient**: Reuses Outline's existing Redis container, isolated on its own logical DB (`db/1`) so the two queues never collide.
+* **Smart incremental sync**: Real-time webhooks and a periodic scheduler (hourly by default) work together, tracking only documents changed or deleted since the last `updated_at` cursor — no full re-embed on every run.
+* **Gemini key pool**: Register multiple Gemini API keys and they're called round-robin, with automatic failover when one hits a rate limit (429).
+* **MCP token auth**: The MCP server (SSE) refuses to even start unless at least one token is registered in `MCP_AUTH_TOKENS`, and any request with an unregistered token gets a 401. This stops anyone who merely knows the URL from searching your knowledge base.
+
+---
+
+## 🛠 Architecture
 
 ```text
-Outline Stack (기존 인프라)            outline-net (공유 네트워크)
+Outline Stack (existing infra)         outline-net (shared network)
 ┌──────────────────────────────┐              │
 │  [Outline]     [Redis]       │◄─────────────┼──────────────┐
 └───────────────────▲──────────┘              │              │
-                    │ (논리 DB /1 재사용)       │               │
+                    │ (reuses logical DB /1)   │               │
 ┌───────────────────┴─────────────────────────▼──────────────┼
 │ outline-mcp-vector (1 Container Stack)                     │              
-│  - FastAPI (웹훅 수신 및 즉시 응답)                           │
-│  - Celery Worker & Beat (백그라운드 청킹 / 임베딩 / 스케줄링)   │
-│  - MCP Server (search_knowledge 도구 제공 via SSE)           │
+│  - FastAPI (receives webhooks, responds immediately)        │
+│  - Celery Worker & Beat (background chunking/embedding/sched)│
+│  - MCP Server (serves the search_knowledge tool over SSE)    │
 └─────────────────────────────────────────────┬──────────────┘
                                               │ (rag-net)
                                       ┌──────▼───────────────────────┐
-                                      │ Qdrant (내부 벡터 DB)         │
+                                      │ Qdrant (internal vector DB)   │
                                       └──────────────────────────────┘
 
 ```
 
 ---
 
-## 📦 3분 빠른 시작 (Quick Start)
+## 📦 3-Minute Quick Start
 
-### 1. Outline 사전 준비 및 Webhook 생성
+### 1. Prep Outline and create a webhook
 
-RAG 서버를 띄우기 전에 Outline 관리자 화면에서 연동에 필요한 정보들을 먼저 확보해야 합니다.
+Before starting the RAG server, gather what you need from the Outline admin screen.
 
-1. **API Key 발급**: Outline **Settings → API Tokens**에서 새 토큰을 생성합니다 (`OUTLINE_API_KEY`).
-2. **Webhook 등록 및 Secret 생성**: Outline **Settings → Webhooks → New webhook**으로 이동하여 아래와 같이 등록하고 **Secret** 값을 복사해둡니다.
-* **URL**: `http://<your-server-ip>:17000/webhook/outline` (RAG 서버가 수신할 주소)
-* **Events**: `documents.create`, `documents.update`, `documents.delete` 선택
-* *생성 후 화면에 표시되는 복잡한 문자열 시크릿을 잘 보관하세요 (`OUTLINE_WEBHOOK_SECRET`).*
+1. **Issue an API key**: In Outline, go to **Settings → API Tokens** and create a new token (`OUTLINE_API_KEY`).
+2. **Register a webhook and grab its secret**: Go to **Settings → Webhooks → New webhook**, register it as below, and copy the **Secret** shown.
+* **URL**: `http://<your-server-ip>:17000/webhook/outline` (the address the RAG server listens on)
+* **Events**: select `documents.create`, `documents.update`, `documents.delete`
+* *Keep the secret string shown after creation somewhere safe (`OUTLINE_WEBHOOK_SECRET`).*
 
 
 
-### 2. Outline Docker Network 확인
+### 2. Check Outline's Docker network
 
-RAG 서버가 Outline 및 Redis 컨테이너와 내부망으로 통신할 수 있도록, 기존 Outline의 `docker-compose.yml`에 아래와 같이 명시적인 외부망 이름(`outline-net`)이 지정되어 있어야 합니다.
+For the RAG server to reach the Outline and Redis containers over the internal network, your existing Outline `docker-compose.yml` needs an explicit external network name (`outline-net`).
 
 ```yaml
-# 기존 Outline docker-compose.yml 예시 (없다면 추가 후 Outline 재시작 필요)
+# Add this to your existing Outline docker-compose.yml if it's missing, then restart Outline
 services:
   outline:
     networks: [outline-net]
@@ -77,30 +81,30 @@ networks:
 
 ```
 
-### 3. 환경 변수 (`.env`) 설정
+### 3. Set environment variables (`.env`)
 
-설치할 디렉토리에 `.env` 파일을 생성하고 1번 단계에서 확보한 값들과 필수 설정들을 입력합니다.
+Create a `.env` file in your install directory and fill in the values from step 1 plus the required settings.
 
 ```env
-# Outline 연동 설정 (1번 단계에서 가져온 값 입력)
-OUTLINE_API_KEY=ol_api_xxxxxxxxxxxx        # Outline API 토큰
-OUTLINE_WEBHOOK_SECRET=your_secret_key     # Outline 웹훅 화면에서 복사한 Secret
-OUTLINE_API_URL=http://outline:3000        # 내부 도커망 통신용 URL
-OUTLINE_PUBLIC_URL=https://wiki.domain.com # 실제 사용자가 브라우저로 접속하는 공개 URL
+# Outline integration (values gathered in step 1)
+OUTLINE_API_KEY=ol_api_xxxxxxxxxxxx        # Outline API token
+OUTLINE_WEBHOOK_SECRET=your_secret_key     # Secret copied from the Outline webhook screen
+OUTLINE_API_URL=http://outline:3000        # Internal Docker-network URL
+OUTLINE_PUBLIC_URL=https://wiki.domain.com # Public URL real users hit in their browser
 
-# AI 및 벡터 DB 설정
-GOOGLE_API_KEYS=key1,key2,key3             # Gemini API 키 (쉼표로 여러 개 등록 가능)
-QDRANT__SERVICE__API_KEY=strong_qdrant_key # Qdrant 인증용 임의의 비밀번호
+# AI and vector DB settings
+GOOGLE_API_KEYS=key1,key2,key3             # Gemini API keys (comma-separated for a round-robin pool)
+QDRANT__SERVICE__API_KEY=strong_qdrant_key # Any string you like, used to authenticate to Qdrant
 
-# MCP 인증 — 여기 등록된 토큰이 없으면 MCP 서버가 아예 기동되지 않습니다.
-# 쉼표로 여러 개 등록해 클라이언트별로 다른 토큰을 발급하세요. 생성 예: openssl rand -hex 32
+# MCP auth — the MCP server won't start at all without at least one token registered here.
+# Comma-separate multiple tokens to issue one per client. Example: openssl rand -hex 32
 MCP_AUTH_TOKENS=token_for_me,token_for_teammate
 
 ```
 
-### 4. Docker Compose 실행
+### 4. Run Docker Compose
 
-아래 내용으로 `docker-compose.yml` 파일을 만들고 곧바로 실행합니다.
+Create a `docker-compose.yml` with the contents below and bring it up.
 
 ```yaml
 version: '3.8'
@@ -127,17 +131,17 @@ services:
     env_file: .env
     environment:
       - QDRANT_URL=http://qdrant:6333
-      - REDIS_URL=redis://redis:6379/1 # Outline의 Redis 컨테이너를 함께 공유 (DB 1번 사용)
+      - REDIS_URL=redis://redis:6379/1 # Shares Outline's Redis container (logical DB 1)
       - MCP_HOST=0.0.0.0
       - MCP_PORT=8080
     ports:
-      - "17000:8000"   # FastAPI 포트 (Webhook, Sync 수신)
-      - "17080:8080"   # FastMCP SSE 포트
+      - "17000:8000"   # FastAPI port (webhook, sync)
+      - "17080:8080"   # FastMCP SSE port
     volumes:
       - sync_state:/data
     networks:
       - rag-net
-      - outline-net    # Outline의 기존 대역에 합류
+      - outline-net    # Joins Outline's existing network
     depends_on:
       qdrant:
         condition: service_healthy
@@ -146,7 +150,7 @@ networks:
   rag-net:
     driver: bridge
   outline-net:
-    external: true     # 이미 구동 중인 Outline 네트워크를 참조
+    external: true     # References the already-running Outline network
 
 volumes:
   qdrant_data:
@@ -159,17 +163,17 @@ docker compose up -d
 
 ```
 
-> **💡 참고**: 컨테이너가 정상적으로 실행되면, Qdrant 벡터 DB가 비어있는 것을 감지하고 Outline의 기존 전체 문서를 자동으로 긁어와 초기 인덱싱(전체 동기화)을 수행합니다.
+> **💡 Note**: Once the container is up, it detects that the Qdrant vector DB is empty and automatically pulls in all of Outline's existing documents for an initial full sync.
 
 ---
 
-## 🔗 외부 클라이언트 연동 가이드 (HTTPS / SSE 방식)
+## 🔗 External Client Setup Guide (HTTPS / SSE)
 
-홈서버 외부에 있는 PC에서 Nginx 등의 역방향 프록시(Reverse Proxy) 및 SSL 인증서가 적용된 홈서버 도메인을 통해 안전하게 연동하는 방법입니다.
+How to connect securely from a PC outside your home server, through an Nginx reverse proxy and an SSL certificate on your home server's domain.
 
-### 1. Nginx 역방향 프록시 설정 (필수)
+### 1. Nginx reverse proxy config (required)
 
-FastMCP가 사용하는 SSE(Server-Sent Events) 스트리밍이 끊기지 않도록, 도메인 서브블록(`proxy_pass`) 설정을 반드시 RAG 서버의 **`17080` 포트**로 매핑하고 **프록시 버퍼링 비활성화** 옵션을 추가해 주세요.
+So the SSE (Server-Sent Events) streaming FastMCP uses doesn't get cut off, make sure your domain's `proxy_pass` block maps to the RAG server's **port `17080`** and disables proxy buffering.
 
 ```nginx
 server {
@@ -180,10 +184,10 @@ server {
     ssl_certificate_key /path/to/privkey.pem;
 
     location / {
-        # ⭐ 핵심: 도커 콤포즈가 열어놓은 MCP 포트(17080)로 전달합니다.
+        # ⭐ Key part: forward to the MCP port (17080) exposed by docker-compose.
         proxy_pass http://localhost:17080;
         
-        # SSE 연결 실시간 유지를 위한 필수 설정
+        # Required to keep the SSE connection alive in real time
         proxy_buffering off;
         proxy_cache off;
         proxy_set_header Connection '';
@@ -198,12 +202,9 @@ server {
 
 ```
 
-### 2. Claude Desktop 연동
+### 2. Claude Desktop setup
 
-MCP 서버는 `.env`의 `MCP_AUTH_TOKENS`에 등록된 토큰이 없으면 아무 요청도 처리하지 않습니다(401). 외부 PC의
-`claude_desktop_config.json`에 프록시 세팅이 완료된 홈서버의 HTTPS 도메인 주소와 패스(`/sse`)를 기입하되,
-URL 쿼리 파라미터로 토큰을 함께 넘겨주세요 (`?token=...`). Claude Desktop의 `url` 필드는 커스텀 헤더를
-지정할 수 없기 때문에, `Authorization: Bearer` 헤더 대신 쿼리 파라미터로도 인증되도록 만들어 두었습니다.
+The MCP server won't process any request unless it carries a token registered in `.env`'s `MCP_AUTH_TOKENS` (returns 401 otherwise). In your external PC's `claude_desktop_config.json`, enter your proxied home server's HTTPS domain and path (`/sse`), passing the token as a URL query parameter (`?token=...`). Claude Desktop's `url` field can't attach custom headers, so the server accepts the token via query param as well as `Authorization: Bearer`.
 
 ```json
 {
@@ -216,19 +217,18 @@ URL 쿼리 파라미터로 토큰을 함께 넘겨주세요 (`?token=...`). Clau
 
 ```
 
-커스텀 헤더를 지정할 수 있는 클라이언트(예: `mcp-remote`)라면 `Authorization: Bearer token_for_teammate`
-헤더로도 동일하게 인증할 수 있습니다.
+Clients that can set custom headers (e.g. `mcp-remote`) can authenticate the same way with an `Authorization: Bearer token_for_teammate` header.
 
 ---
 
-## ⚙️ 수동 동기화 및 관리 API
+## ⚙️ Manual Sync & Management API
 
-백그라운드 자동 동기화(1시간 주기) 외에 직접 인덱싱을 제어하고 싶을 때 사용합니다.
+For controlling indexing directly, beyond the background auto-sync (hourly by default).
 
-* **증분 동기화 트리거**: `POST http://localhost:17000/sync/outline`
-* **전체 강제 재인덱싱**: `POST http://localhost:17000/sync/outline?full=true`
-* **동기화 상태 확인**: `GET http://localhost:17000/sync/status`
+* **Trigger an incremental sync**: `POST http://localhost:17000/sync/outline`
+* **Force a full re-index**: `POST http://localhost:17000/sync/outline?full=true`
+* **Check sync status**: `GET http://localhost:17000/sync/status`
 
 ---
 
-이 오픈소스 프로젝트가 도움이 되셨다면 ⭐️ **Star**로 응원해 주세요! 문의 사항은 언제든 Issue 탭에 남겨주시기 바랍니다.
+If this open-source project has been useful to you, please support it with a ⭐️ **Star**! Feel free to leave any questions in the Issues tab.
