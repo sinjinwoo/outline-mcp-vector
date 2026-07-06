@@ -40,6 +40,15 @@
 * `MCP_AUTH_TOKENS`가 비어 있으면 `build_app()`이 기동 시점에 `RuntimeError`를 던지도록 해서, "토큰 설정을 깜빡하고 인증 없이 떠버리는" 사고를 원천 차단
 * `starlette.testclient.TestClient`로 401/200 케이스를 직접 검증. 다만 실제 `/sse` 라우트는 응답 바디가 끝나지 않는 스트림이라 `TestClient.get()`으로 성공 케이스를 찍으면 그대로 행업됨 — 성공 케이스는 `TokenAuthMiddleware`만 떼어내 더미 200 라우트에 씌운 별도 테스트 앱으로 검증해서 회피 (`tests/test_mcp_auth.py`)
 
+### 검토했지만 채택하지 않은 대안: `OUTLINE_API_KEY` 재사용
+
+* 별도로 `MCP_AUTH_TOKENS`를 만드는 대신, 이미 갖고 있는 `OUTLINE_API_KEY`로 MCP 인증을 돌리면 시크릿을 하나 덜 관리해도 되지 않을까 하는 아이디어가 나왔음
+* 기각한 이유:
+  1. **블라스트 반경 불일치**: `OUTLINE_API_KEY`는 Outline 위키 자체에 대한 읽기/쓰기 권한을 가진 자격증명이다. 이 토큰이 새면 지금은 "검색만 가능"에서 끝나지만, Outline 키를 그대로 쓰면 위키 쓰기 권한까지 함께 노출된다 — MCP 쪽 인증 실패의 대가가 훨씬 커짐
+  2. **키가 사람 수만큼 없음**: `OUTLINE_API_KEY`는 보통 1개뿐이라 클라이언트(사람)별로 나눠주거나 유출 시 개별 회수를 할 수 없음. `MCP_AUTH_TOKENS`는 `GOOGLE_API_KEYS`와 같은 쉼표 구분 풀 방식이라 클라이언트별 발급/회수가 가능
+  3. **런타임 의존성 추가**: Outline 키가 유효한지 검증하려면 매 요청마다 Outline API를 호출해야 하는데, MCP 서버는 "Outline이 죽어 있어도 검색은 계속 가능"해야 하는 read-only 독립 경로로 설계돼 있음(모듈 경계 문서 참고). 인증을 Outline에 의존시키면 이 독립성이 깨짐
+* 결론: 시크릿이 하나 늘어나는 비용보다 위 세 가지가 더 크다고 판단해 `MCP_AUTH_TOKENS`를 그대로 유지
+
 ---
 
 ## 4. 배운 점
