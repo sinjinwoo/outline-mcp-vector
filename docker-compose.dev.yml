@@ -1,6 +1,6 @@
 # Local development override — builds the image from source instead of
 # pulling, and assumes there's NO local Outline stack to join:
-#   - rag-server connects to the already-deployed Outline over its public
+#   - outline-mcp-vector connects to the already-deployed Outline over its public
 #     URL (.env's OUTLINE_BASE_URL) — outline-net is dropped, and
 #     OUTLINE_API_URL is cleared so it can't accidentally point at an
 #     unreachable internal hostname.
@@ -27,7 +27,7 @@ services:
       timeout: 5s
       retries: 5
 
-  rag-server:
+  outline-mcp-vector:
     build:
       context: .
       dockerfile: Dockerfile

@@ -12,7 +12,7 @@ Outline 위키의 문서들을 자동으로 벡터화하여, AI 에이전트(Cla
 
 ## ✨ 핵심 특징
 
-* **단일 컨테이너 배포 (`rag-server`)**: FastAPI, Celery (Worker/Beat), MCP 서버가 컨테이너 하나로 구동되어 관리가 편리합니다.
+* **단일 컨테이너 배포 (`outline-mcp-vector`)**: FastAPI, Celery (Worker/Beat), MCP 서버가 컨테이너 하나로 구동되어 관리가 편리합니다.
 * **인프라 자원 최적화**: Outline이 이미 사용 중인 Redis 컨테이너를 함께 공유하되, 논리 디비(`db/1`)를 분리하여 격리된 큐를 구성합니다.
 * **지능형 증분 동기화**: 실시간 웹훅(Webhook)과 주기적(기본 1시간) 스케줄러가 협업하여 `updated_at` 기준 변경·삭제된 문서만 스마트하게 추적 반영합니다.
 * **Gemini Key Pool**: 여러 개의 Gemini API 키를 등록하면 라운드 로빈 방식으로 호출하며, Rate Limit(429) 발생 시 자동 Failover를 수행합니다.
@@ -29,7 +29,7 @@ Outline Stack (기존 인프라)            outline-net (공유 네트워크)
 └───────────────────▲──────────┘              │              │
                     │ (논리 DB /1 재사용)       │               │
 ┌───────────────────┴─────────────────────────▼──────────────┼
-│ rag-server (1 Container Stack)                             │              
+│ outline-mcp-vector (1 Container Stack)                     │              
 │  - FastAPI (웹훅 수신 및 즉시 응답)                           │
 │  - Celery Worker & Beat (백그라운드 청킹 / 임베딩 / 스케줄링)   │
 │  - MCP Server (search_knowledge 도구 제공 via SSE)           │
@@ -120,8 +120,8 @@ services:
       timeout: 5s
       retries: 5
 
-  rag-server:
-    image: sjw0066/rag-server:latest
+  outline-mcp-vector:
+    image: sjw0066/outline-mcp-vector:latest
     env_file: .env
     environment:
       - QDRANT_URL=http://qdrant:6333

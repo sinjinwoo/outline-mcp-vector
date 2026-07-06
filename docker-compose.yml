@@ -15,8 +15,8 @@ services:
       timeout: 5s
       retries: 5
 
-  rag-server:
-    image: sjw0066/rag-server:latest
+  outline-mcp-vector:
+    image: sjw0066/outline-mcp-vector:latest
     env_file: .env
     environment:
       - QDRANT_URL=http://qdrant:6333

@@ -71,7 +71,7 @@ outline-rag-mcp/
 
 ## 설계 원칙
 
-- 단일 Docker 이미지(`rag-server`)로 배포
+- 단일 Docker 이미지(`outline-mcp-vector`)로 배포
 - Supervisor가 FastAPI, Celery Worker, Celery Beat, MCP Server를 관리
 - Outline Webhook 기반 증분 동기화
 - Gemini(`gemini-embedding-002`) 고정
@@ -90,7 +90,13 @@ pytest
 외부 서비스는 모두 Mock으로 대체되어 Redis, Outline, Gemini, Qdrant 없이 실행할 수 있습니다.
 
 ---
+## 개발환경
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build -d
 
+```
+
+---
 ## 트러블슈팅
 
 버그 해결 과정이나 운영 중 발생한 이슈는
