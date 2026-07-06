@@ -7,6 +7,16 @@ services:
       context: .
       dockerfile: indexer/Dockerfile
 
+  worker:
+    build:
+      context: .
+      dockerfile: indexer/Dockerfile
+
+  beat:
+    build:
+      context: .
+      dockerfile: indexer/Dockerfile
+
   mcp:
     build:
       context: .
