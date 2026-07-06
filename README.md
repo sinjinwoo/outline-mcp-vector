@@ -16,6 +16,7 @@ Outline 위키의 문서들을 자동으로 벡터화하여, AI 에이전트(Cla
 * **인프라 자원 최적화**: Outline이 이미 사용 중인 Redis 컨테이너를 함께 공유하되, 논리 디비(`db/1`)를 분리하여 격리된 큐를 구성합니다.
 * **지능형 증분 동기화**: 실시간 웹훅(Webhook)과 주기적(기본 1시간) 스케줄러가 협업하여 `updated_at` 기준 변경·삭제된 문서만 스마트하게 추적 반영합니다.
 * **Gemini Key Pool**: 여러 개의 Gemini API 키를 등록하면 라운드 로빈 방식으로 호출하며, Rate Limit(429) 발생 시 자동 Failover를 수행합니다.
+* **MCP 토큰 인증**: MCP 서버(SSE)는 `MCP_AUTH_TOKENS`에 등록된 토큰이 없으면 아예 기동되지 않으며, 등록되지 않은 토큰으로의 요청은 모두 401로 거부됩니다. URL만 알아도 아무나 지식베이스를 검색할 수 없도록 막는 장치입니다.
 
 ---
 
@@ -26,12 +27,12 @@ Outline Stack (기존 인프라)            outline-net (공유 네트워크)
 ┌──────────────────────────────┐              │
 │  [Outline]     [Redis]       │◄─────────────┼──────────────┐
 └───────────────────▲──────────┘              │              │
-                    │ (논리 DB /1 재사용)      │              │
-┌───────────────────┴─────────────────────────▼──────────────┼──────────────┐
-│ rag-server (1 Container Stack)                             │              │
-│  - FastAPI (웹훅 수신 및 즉시 응답)                                        │
-│  - Celery Worker & Beat (백그라운드 청킹 / 임베딩 / 스케줄링)              │
-│  - MCP Server (search_knowledge 도구 제공 via SSE)                         │
+                    │ (논리 DB /1 재사용)       │               │
+┌───────────────────┴─────────────────────────▼──────────────┼
+│ rag-server (1 Container Stack)                             │              
+│  - FastAPI (웹훅 수신 및 즉시 응답)                           │
+│  - Celery Worker & Beat (백그라운드 청킹 / 임베딩 / 스케줄링)   │
+│  - MCP Server (search_knowledge 도구 제공 via SSE)           │
 └─────────────────────────────────────────────┬──────────────┘
                                               │ (rag-net)
                                       ┌──────▼───────────────────────┐
@@ -89,6 +90,10 @@ OUTLINE_PUBLIC_URL=https://wiki.domain.com # 실제 사용자가 브라우저로
 GOOGLE_API_KEYS=key1,key2,key3             # Gemini API 키 (쉼표로 여러 개 등록 가능)
 QDRANT__SERVICE__API_KEY=strong_qdrant_key # Qdrant 인증용 임의의 비밀번호
 
+# MCP 인증 — 여기 등록된 토큰이 없으면 MCP 서버가 아예 기동되지 않습니다.
+# 쉼표로 여러 개 등록해 클라이언트별로 다른 토큰을 발급하세요. 생성 예: openssl rand -hex 32
+MCP_AUTH_TOKENS=token_for_me,token_for_teammate
+
 ```
 
 ### 4. Docker Compose 실행
@@ -121,7 +126,6 @@ services:
     environment:
       - QDRANT_URL=http://qdrant:6333
       - REDIS_URL=redis://redis:6379/1 # Outline의 Redis 컨테이너를 함께 공유 (DB 1번 사용)
-      - MCP_TRANSPORT=sse
       - MCP_HOST=0.0.0.0
       - MCP_PORT=8080
     ports:
@@ -194,18 +198,24 @@ server {
 
 ### 2. Claude Desktop 연동
 
-외부 PC의 `claude_desktop_config.json` 설정 파일에 프록시 세팅이 완료된 홈서버의 HTTPS 도메인 주소와 패스(`/sse`)를 기입합니다.
+MCP 서버는 `.env`의 `MCP_AUTH_TOKENS`에 등록된 토큰이 없으면 아무 요청도 처리하지 않습니다(401). 외부 PC의
+`claude_desktop_config.json`에 프록시 세팅이 완료된 홈서버의 HTTPS 도메인 주소와 패스(`/sse`)를 기입하되,
+URL 쿼리 파라미터로 토큰을 함께 넘겨주세요 (`?token=...`). Claude Desktop의 `url` 필드는 커스텀 헤더를
+지정할 수 없기 때문에, `Authorization: Bearer` 헤더 대신 쿼리 파라미터로도 인증되도록 만들어 두었습니다.
 
 ```json
 {
   "mcpServers": {
     "outline-knowledge-base": {
-      "url": "https://mcp.your-domain.com/sse"
+      "url": "https://mcp.your-domain.com/sse?token=token_for_teammate"
     }
   }
 }
 
 ```
+
+커스텀 헤더를 지정할 수 있는 클라이언트(예: `mcp-remote`)라면 `Authorization: Bearer token_for_teammate`
+헤더로도 동일하게 인증할 수 있습니다.
 
 ---
 

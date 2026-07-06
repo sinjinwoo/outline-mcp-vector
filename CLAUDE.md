@@ -67,7 +67,11 @@ This is a deliberate design principle (see `createplan.md` §13, `CONTRIBUTING.m
   - `sync_lock.py` — Redis-backed locks: `acquire_sync_lock`/`release_sync_lock` (prevents overlapping sync runs) and `doc_lock(doc_id)` (prevents a webhook event and a sync pass from racing on the *same document* — see below).
   - `pipeline.py` — chunk → embed → upsert for one `Document`.
   - `chunker.py` — markdown chunking.
-- `mcpserver/` — `search_knowledge` FastMCP tool: embed query → `vector_store.search`. No write path.
+- `mcpserver/` — `search_knowledge` FastMCP tool: embed query → `vector_store.search`. No write path. SSE-only, and gated by a token check (`MCP_AUTH_TOKENS`, comma-separated pool, same convention as `GOOGLE_API_KEYS`) — see below.
+
+### MCP auth gotcha
+
+`mcpserver/main.py` never calls `mcp.run(transport=...)` — that path serves `sse_app()` directly with no hook for middleware. Instead it pulls the Starlette app via `mcp.sse_app()`, wraps it in `TokenAuthMiddleware`, and serves that with `uvicorn.run()` itself. The middleware accepts the token as either an `Authorization: Bearer` header or a `?token=` query param, because Claude Desktop's plain `url`-only MCP client config can't attach custom headers to an SSE connection. `build_app()` raises at startup if `MCP_AUTH_TOKENS` is empty — this is intentional, an MCP server with no tokens configured should refuse to start rather than serve unauthenticated. If you ever reintroduce `mcp.run()` or another transport, you have to reproduce this wrapping or you'll silently drop auth.
 
 ### Sync model
 
@@ -101,3 +105,5 @@ Every external dependency is mocked — tests never need a running Redis/Qdrant/
 - Celery tasks are tested by calling the task object directly (`tasks_module.run_sync(full=False)`), not `.delay()` — this runs the task body synchronously in-process with no broker needed.
 
 See `CONTRIBUTING.md` for branch/commit conventions, the PR checklist, and how to add a new embedding provider if `GeminiProvider` ever needs a sibling. See `docs/troubleshooting/` for write-ups of real bugs found in this codebase (template at `docs/troubleshooting/template.md`).
+
+테스트와 도커 빌드 같은 경우는 사용자에게 어떤 테스트가 필요한지 안내하고, 위임한다.
