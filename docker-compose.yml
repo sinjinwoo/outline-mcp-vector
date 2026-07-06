@@ -16,19 +16,68 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    # Celery 브로커 + 동기화 락 전용 — Outline과는 별도 인스턴스
+    command: ["redis-server", "--appendonly", "yes"]
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - rag-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   indexer:
     image: sjw0066/rag-indexer:${IMAGE_TAG:-latest}
     env_file: .env
     environment:
       - QDRANT_URL=http://qdrant:6333
+      - REDIS_URL=redis://redis:6379/1
     ports:
       - "17000:8000"   # host:container
-    volumes:
-      - hf_cache:/root/.cache/huggingface
     networks:
       - rag-net
     depends_on:
       qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    # Celery 워커: 웹훅 이벤트 처리와 동기화 실행을 전담 (API 프로세스와 분리)
+    image: sjw0066/rag-indexer:${IMAGE_TAG:-latest}
+    command: ["celery", "-A", "indexer.celery_app", "worker", "--loglevel=info"]
+    env_file: .env
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+      - REDIS_URL=redis://redis:6379/1
+    volumes:
+      - sync_state:/data
+    networks:
+      - rag-net
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  beat:
+    # 주기적 동기화 스케줄러 (기본 1시간 간격, SYNC_INTERVAL_SECONDS로 조정)
+    image: sjw0066/rag-indexer:${IMAGE_TAG:-latest}
+    command: ["celery", "-A", "indexer.celery_app", "beat", "--loglevel=info"]
+    env_file: .env
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+      - REDIS_URL=redis://redis:6379/1
+    networks:
+      - rag-net
+    depends_on:
+      redis:
         condition: service_healthy
 
   mcp:
@@ -41,8 +90,6 @@ services:
       - MCP_PORT=8080
     ports:
       - "17080:8080"   # host:container
-    volumes:
-      - hf_cache:/root/.cache/huggingface
     networks:
       - rag-net
     depends_on:
@@ -55,4 +102,5 @@ networks:
 
 volumes:
   qdrant_data:
-  hf_cache:
+  sync_state:
+  redis_data:
