@@ -2,11 +2,12 @@ name: Build & Push Docker Image
 
 on:
   push:
-    tags: ["v*"]          # e.g. v1.0.0 → tagged release
-  workflow_dispatch:      # allow manual trigger from GitHub UI
+    tags:
+      - 'v*.*.*'       # e.g., v1.0.0 태그 푸시 시 자동 실행
+  workflow_dispatch:   # GitHub UI에서 수동 실행 허용
 
 env:
-  # Set your Docker Hub username in repo Settings → Secrets → DOCKERHUB_USERNAME
+  # Docker Hub에 업로드될 이미지명 (DOCKERHUB_USERNAME 시크릿 연동)
   IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/outline-mcp-vector
 
 jobs:
@@ -14,23 +15,23 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Build for both amd64 (servers) and arm64 (Apple M-series / Raspberry Pi)
+      # Buildx 빌더 컨텍스트 설정
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # Docker Hub 로그인
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Determine image tags:
-      #   push tag v*        → :v1.0.0 + :1.0 + :latest
-      #   workflow_dispatch  → :latest + :<short-sha>
+      # 이미지 메타데이터(태그 및 라벨) 추출 규칙 선언
       - name: Extract metadata (tags & labels)
         id: meta
         uses: docker/metadata-action@v5
@@ -42,15 +43,17 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
+      # 🚀 빌드 및 푸시 수행 단계
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile
-          platforms: linux/amd64,linux/arm64
+          # ⚡ [속도 최적화] 홈서버 아키텍처에 맞춘 amd64 단일 플랫폼 지정 (QEMU 지연 제거)
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Cache layers in GitHub Actions cache for faster rebuilds
+          # ⚡ [캐시 최적화] GitHub Actions 기본 캐시를 활용해 변경 사항만 압축 빌드
           cache-from: type=gha,scope=outline-mcp-vector
           cache-to: type=gha,mode=max,scope=outline-mcp-vector
