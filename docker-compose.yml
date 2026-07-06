@@ -1,49 +1,36 @@
 services:
   qdrant:
     image: qdrant/qdrant:latest
-    # Qdrant는 외부에 노출하지 않음 — rag-net 내부에서만 접근
     expose:
       - "6333"
     environment:
-      # Bare name (no "=default") so this var is entirely absent from the
-      # container when unset in .env — Qdrant then runs with no auth at all.
-      # `=${...:-}` would instead set an empty string, which paradoxically
-      # makes Qdrant *require* an (empty) api-key header while our client
-      # skips sending one for an empty key, and every request 401s.
       - QDRANT__SERVICE__API_KEY
     volumes:
       - qdrant_data:/qdrant/storage
     networks:
       - rag-net
     healthcheck:
-      # qdrant's image doesn't ship curl/wget — use bash's /dev/tcp instead.
       test: ["CMD-SHELL", "bash -c 'echo -e \"GET /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" > /dev/tcp/localhost/6333' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   rag-server:
-    # 단일 컨테이너: Supervisor가 FastAPI(webhook/sync/health) + Celery Worker +
-    # Celery Beat + MCP 서버를 함께 관리한다 (설계문서 13번 섹션).
-    # Outline이 이미 떠 있는 outline-net에 합류해 내부 호스트명(outline, redis)으로
-    # 직접 통신 — Outline의 기존 Redis를 그대로 재사용하고(별도 논리 DB), 별도
-    # redis 컨테이너는 두지 않는다.
-    image: sjw0066/rag-server:${IMAGE_TAG:-latest}
+    image: sjw0066/rag-server:latest
     env_file: .env
     environment:
       - QDRANT_URL=http://qdrant:6333
-      - REDIS_URL=redis://redis:6379/1
-      - MCP_TRANSPORT=sse
+      - REDIS_URL=redis://redis:6379/1 # Outline의 Redis 컨테이너를 함께 공유 (DB 1번 사용)
       - MCP_HOST=0.0.0.0
       - MCP_PORT=8080
     ports:
-      - "17000:8000"   # FastAPI: webhook + sync + health
-      - "17080:8080"   # MCP SSE
+      - "17000:8000"   # FastAPI 포트 (Webhook, Sync 수신)
+      - "17080:8080"   # FastMCP SSE 포트
     volumes:
       - sync_state:/data
     networks:
       - rag-net
-      - outline-net
+      - outline-net    # Outline의 기존 대역에 합류
     depends_on:
       qdrant:
         condition: service_healthy
@@ -52,9 +39,7 @@ networks:
   rag-net:
     driver: bridge
   outline-net:
-    # docker-compose.outline.yml에서 정의한 네트워크에 합류 (Outline 스택이
-    # 먼저 떠 있어야 함). 재사용할 Redis, 그리고 outline 컨테이너 자체가 여기 있음.
-    external: true
+    external: true     # 이미 구동 중인 Outline 네트워크를 참조
 
 volumes:
   qdrant_data:
