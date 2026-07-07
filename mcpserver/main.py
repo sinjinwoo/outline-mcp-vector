@@ -11,6 +11,8 @@ from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from shared.embedder import embed_query
 from shared.vector_store import search
@@ -106,6 +108,27 @@ mcp = FastMCP(
     auth=_auth_settings,
     token_verifier=_token_verifier,
 )
+
+if MCP_OAUTH_ENABLED:
+    # The SDK only serves RFC 9728 protected-resource metadata at
+    # /.well-known/oauth-protected-resource (bare, not under the resource's
+    # own /mcp path, despite what build_resource_metadata_url's docstring
+    # implies — confirmed empirically against this SDK version). Claude
+    # Desktop's OAuth client is fine with that. Claude Code's, as of mid-2026,
+    # instead only probes {resource_path}/.well-known/oauth-protected-resource
+    # (i.e. /mcp/.well-known/oauth-protected-resource) and never falls back to
+    # the bare path, so without this it can't discover Keycloak as the
+    # authorization server at all. Mirror the same document at that path too
+    # rather than relying on client-specific behavior to line up.
+    @mcp.custom_route(f"{mcp.settings.streamable_http_path}/.well-known/oauth-protected-resource", methods=["GET"])
+    async def protected_resource_metadata_compat(request: Request) -> JSONResponse:
+        return JSONResponse(
+            {
+                "resource": MCP_OAUTH_RESOURCE_URL,
+                "authorization_servers": [MCP_OAUTH_ISSUER_URL],
+                "bearer_methods_supported": ["header"],
+            }
+        )
 
 
 @mcp.tool()

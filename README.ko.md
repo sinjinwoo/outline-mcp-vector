@@ -251,21 +251,27 @@ server {
 안에서만 접근 가능하다면 문제없지만, 외부에 그대로 노출된다면 URL만 알아도 지식베이스를 검색할 수 있으니
 리버스 프록시 IP 허용목록이나 VPN 등으로 앞단을 막아두세요. 이 모드에서는 그냥 URL만 등록하면 됩니다.
 
-```json
-{
-  "mcpServers": {
-    "outline-knowledge-base": {
-      "url": "https://mcp.your-domain.com/mcp"
-    }
-  }
-}
+`MCP_OAUTH_ENABLED=true`(Keycloak)로 켜두면 Claude Desktop의 원격 커넥터가 서버의 OAuth 메타데이터를 스스로 찾아내어 최초 연결 시 브라우저 로그인/동의 화면으로 안내합니다 — config에 붙여 넣을 정적 토큰이 따로 없습니다. 로컬에서 테스트해보고 싶다면 `docs/keycloak-reference-compose.yml`의 임시 Keycloak realm을 참고하세요. 브라우저 기반 OAuth 플로우를 탈 수 없는 클라이언트는 이미 발급받은 Keycloak 액세스 토큰을 `Authorization: Bearer <token>` 헤더로 직접 보내는 방식으로도 인증할 수 있습니다.
+
+### 3. Claude Code(CLI) 연동
+
+OAuth가 꺼져 있으면 다른 HTTP MCP 서버와 똑같이 등록하면 됩니다:
+
+```bash
+claude mcp add --transport http outline-knowledge-base https://mcp.your-domain.com/mcp
 ```
 
-`MCP_OAUTH_ENABLED=true`(Keycloak)로 켜두면 Claude Desktop의 원격 커넥터가 서버의 OAuth 메타데이터를
-스스로 찾아내어 최초 연결 시 브라우저 로그인/동의 화면으로 안내합니다 — config에 붙여 넣을 정적 토큰이
-따로 없습니다. 로컬에서 테스트해보고 싶다면 `docs/keycloak-reference-compose.yml`의 임시 Keycloak realm을
-참고하세요. 브라우저 기반 OAuth 플로우를 탈 수 없는 클라이언트는 이미 발급받은 Keycloak 액세스 토큰을
-`Authorization: Bearer <token>` 헤더로 직접 보내는 방식으로도 인증할 수 있습니다.
+`MCP_OAUTH_ENABLED=true`인 경우엔 Dynamic Client Registration을 쓰지 말고 미리 등록해둔 client로 붙이세요 — Keycloak의 기본 "Trusted Hosts" Client Registration Policy가 낯선 호스트에서 오는 익명 DCR을 거부하는데(ngrok 같은 개발용 터널이 딱 여기 걸립니다), Claude Code 자체의 OAuth 콜백도 로컬 루프백 주소(`http://localhost:PORT/callback`)라서 Claude Desktop의 콜백(`https://claude.ai/api/mcp/auth_callback`)과 다릅니다 — 두 클라이언트를 같은 Keycloak client로 같이 쓰려면 둘 다 등록해야 합니다.
+
+1. Keycloak에서 그 client의 **Valid redirect URIs**에 `http://localhost:8080/callback`(포트는 아래와 맞추면 임의로 선택 가능)을 다른 클라이언트의 콜백과 나란히 추가합니다.
+2. 그 client의 자격증명으로 서버를 등록합니다:
+   ```bash
+   claude mcp add-json outline-knowledge-base \
+     '{"type":"http","url":"https://mcp.your-domain.com/mcp","oauth":{"clientId":"your-client-id","callbackPort":8080}}' \
+     --client-secret
+   ```
+   (시크릿 입력을 물어보고, `.mcp.json`이 아니라 시스템 키체인/credential store에 저장됩니다)
+3. `claude mcp login outline-knowledge-base` (또는 세션 안에서 `/mcp`)로 브라우저 로그인을 진행합니다.
 
 ---
 

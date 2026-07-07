@@ -210,3 +210,4 @@ __marimo__/
 celerybeat-schedule*
 docker-compose.outline.yml
 .env.outline
+.mcp.json

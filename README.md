@@ -268,6 +268,26 @@ By default (`MCP_OAUTH_ENABLED` unset) the MCP server processes any request with
 
 If you turn on `MCP_OAUTH_ENABLED=true` (Keycloak), Claude Desktop's remote connector discovers the server's OAuth metadata itself and walks you through a normal browser login/consent flow the first time you connect — there's no static token to paste into the config. See `docs/keycloak-reference-compose.yml` for a throwaway Keycloak realm if you want to test this locally. Clients that can't run a browser-based OAuth flow can instead send an already-issued Keycloak access token directly as an `Authorization: Bearer <token>` header.
 
+### 3. Claude Code (CLI) setup
+
+With OAuth off, add it like any other remote HTTP server:
+
+```bash
+claude mcp add --transport http outline-knowledge-base https://mcp.your-domain.com/mcp
+```
+
+With `MCP_OAUTH_ENABLED=true`, skip Dynamic Client Registration and register a pre-configured client instead — Keycloak's default "Trusted Hosts" Client Registration Policy rejects anonymous DCR from hosts it doesn't already know about (a plain dev tunnel like ngrok will hit this), and Claude Code's own OAuth callback is a local loopback URL (`http://localhost:PORT/callback`), different from Claude Desktop's (`https://claude.ai/api/mcp/auth_callback`) — both need to be registered on the same Keycloak client if you use both.
+
+1. In Keycloak, add `http://localhost:8080/callback` (or whichever port you pick below) to that client's **Valid redirect URIs**, alongside any other client's callback already there.
+2. Register the server with that client's credentials:
+   ```bash
+   claude mcp add-json outline-knowledge-base \
+     '{"type":"http","url":"https://mcp.your-domain.com/mcp","oauth":{"clientId":"your-client-id","callbackPort":8080}}' \
+     --client-secret
+   ```
+   (prompts for the secret; it's stored in your system keychain/credential store, not in `.mcp.json`)
+3. `claude mcp login outline-knowledge-base` (or `/mcp` inside a session) to run through the browser login.
+
 ---
 
 ## ⚙️ Manual Sync & Management API
