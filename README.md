@@ -22,7 +22,7 @@ It **shares your self-hosted Outline stack's existing Redis** instead of spinnin
 * **Infra-efficient**: Reuses Outline's existing Redis container, isolated on its own logical DB (`db/1`) so the two queues never collide.
 * **Smart incremental sync**: Real-time webhooks and a periodic scheduler (hourly by default) work together, tracking only documents changed or deleted since the last `updated_at` cursor — no full re-embed on every run.
 * **Gemini key pool**: Register multiple Gemini API keys and they're called round-robin, with automatic failover when one hits a rate limit (429).
-* **MCP token auth**: The MCP server (SSE) refuses to even start unless at least one token is registered in `MCP_AUTH_TOKENS`, and any request with an unregistered token gets a 401. This stops anyone who merely knows the URL from searching your knowledge base.
+* **MCP auth is opt-in Keycloak/OAuth**: the MCP server (Streamable HTTP) is fully open by default — set `MCP_OAUTH_ENABLED=true` (plus issuer/resource/audience) to require a Keycloak-issued Bearer JWT instead. This project only ever acts as an OAuth Resource Server; it doesn't run or provision Keycloak itself.
 
 ---
 
@@ -38,7 +38,7 @@ Outline Stack (existing infra)         outline-net (shared network)
 │ outline-mcp-vector (1 Container Stack)                     │              
 │  - FastAPI (receives webhooks, responds immediately)        │
 │  - Celery Worker & Beat (background chunking/embedding/sched)│
-│  - MCP Server (serves the search_knowledge tool over SSE)    │
+│  - MCP Server (serves the search_knowledge tool over Streamable HTTP) │
 └─────────────────────────────────────────────┬──────────────┘
                                               │ (rag-net)
                                       ┌──────▼───────────────────────┐
@@ -96,11 +96,61 @@ OUTLINE_PUBLIC_URL=https://wiki.domain.com # Public URL real users hit in their 
 GOOGLE_API_KEYS=key1,key2,key3             # Gemini API keys (comma-separated for a round-robin pool)
 QDRANT__SERVICE__API_KEY=strong_qdrant_key # Any string you like, used to authenticate to Qdrant
 
-# MCP auth — the MCP server won't start at all without at least one token registered here.
-# Comma-separate multiple tokens to issue one per client. Example: openssl rand -hex 32
-MCP_AUTH_TOKENS=token_for_me,token_for_teammate
+# DNS rebinding protection (Host/Origin header validation). Comma-separate your deployed
+# domain(s); leave unset to keep this off (pre-existing behavior). Only relevant against
+# malicious webpages attacking through a browser — non-browser clients (curl, Claude
+# Desktop's remote connector) don't send an Origin header and aren't affected either way.
+# MCP_ALLOWED_HOSTS=mcp.your-domain.com
+# MCP_ALLOWED_ORIGINS=https://mcp.your-domain.com
+
+# MCP auth — off by default (server is fully open). Set MCP_OAUTH_ENABLED=true and fill in
+# the rest to require a Keycloak-issued Bearer JWT instead. This server is a Resource Server
+# only; it validates against your Keycloak realm's JWKS, it doesn't run Keycloak itself
+# (see docs/keycloak-reference-compose.yml for a throwaway realm to test against).
+# MCP_OAUTH_ENABLED=true
+# MCP_OAUTH_ISSUER_URL=https://keycloak.your-domain.com/realms/myrealm
+# MCP_OAUTH_RESOURCE_URL=https://mcp.your-domain.com/mcp
+# MCP_OAUTH_AUDIENCE=outline-mcp-client
 
 ```
+
+See the MCP spec's own [Authorization guide](https://modelcontextprotocol.io/docs/tutorials/security/authorization) for the OAuth concepts behind the `MCP_OAUTH_*` vars above (Resource Server vs Authorization Server, Protected Resource Metadata, etc).
+
+| Variable | Required? | Default | Notes |
+|---|---|---|---|
+| `OUTLINE_API_KEY` | **Required** | — | Outline API token (Settings → API & Apps) |
+| `OUTLINE_WEBHOOK_SECRET` | **Required** | — | Outline webhook signing secret. If left empty, webhook signature verification is skipped entirely — not recommended |
+| `OUTLINE_BASE_URL` | **Required** | — | Outline's public URL; also the fallback for `OUTLINE_API_URL`/`OUTLINE_PUBLIC_URL` below |
+| `GOOGLE_API_KEYS` | **Required**¹ | — | Comma-separated Gemini API key pool, round-robin with failover |
+| `QDRANT__SERVICE__API_KEY` | **Required** | — | Any string; also passed to the Qdrant container itself as `service.api_key` |
+| `GEMINI_API_KEY` | Optional | — | ¹ Single-key fallback if you don't need `GOOGLE_API_KEYS`' pool |
+| `OUTLINE_API_URL` | Optional | = `OUTLINE_BASE_URL` | Internal Docker-network URL for actual Outline API calls |
+| `OUTLINE_PUBLIC_URL` | Optional | = `OUTLINE_BASE_URL` | Public URL used to build the doc links shown in search results |
+| `GEMINI_EMBEDDING_DIM` | Optional | `3072` | Output vector dimensionality |
+| `GEMINI_TIMEOUT_MS` | Optional | `30000` | Per-request Gemini timeout, milliseconds |
+| `QDRANT_URL` | Optional | `http://localhost:6333` | |
+| `QDRANT_TIMEOUT_SECONDS` | Optional | `10` | Per-request Qdrant timeout, seconds |
+| `MCP_HOST` | Optional | `0.0.0.0` | |
+| `MCP_PORT` | Optional | `8080` | |
+| `MCP_ALLOWED_HOSTS` | Optional | *(empty → protection off)* | Comma-separated Host allow-list for DNS rebinding protection |
+| `MCP_ALLOWED_ORIGINS` | Optional | *(empty)* | Comma-separated Origin allow-list, same protection |
+| `MCP_OAUTH_ENABLED` | Optional | `false` | Turns on Keycloak/OAuth Bearer-token auth; server is fully open while `false` |
+| `MCP_OAUTH_ISSUER_URL` | Required if `MCP_OAUTH_ENABLED=true` | — | Keycloak realm issuer URL |
+| `MCP_OAUTH_RESOURCE_URL` | Required if `MCP_OAUTH_ENABLED=true` | — | This server's own external URL, including the `/mcp` path |
+| `MCP_OAUTH_AUDIENCE` | Required if `MCP_OAUTH_ENABLED=true` | — | Must match the `aud` claim your Keycloak client issues |
+| `MCP_OAUTH_JWKS_URL` | Optional | `{issuer}/protocol/openid-connect/certs` | Only needed if your IdP doesn't use Keycloak's default path |
+| `REDIS_URL` | Optional | `redis://redis:6379/1` | Shares Outline's Redis container, logical DB 1 |
+| `SYNC_INTERVAL_SECONDS` | Optional | `3600` | Celery Beat's incremental-sync interval |
+
+**Setting up the Keycloak client for `MCP_OAUTH_*`:** in the Keycloak admin console, on the realm you're pointing `MCP_OAUTH_ISSUER_URL` at —
+
+1. A brand-new realm has no users of its own — the realm-creation wizard doesn't ask for one, and the `master` realm's admin account you log into the console with does **not** carry over. If anyone will ever log in interactively against this realm (e.g. Claude's browser-based OAuth flow, as opposed to a pure machine-to-machine `client_credentials` setup), create a real user first: **Users** → **Create new user**, then that user's **Credentials** tab → **Set password**.
+2. **Clients** → **Create client** → give it a client ID (this is the same value you'll put in `MCP_OAUTH_AUDIENCE`). If this client will be used for a browser login flow, also enable **Standard flow** on its Settings tab, and add the caller's own OAuth callback to **Valid redirect URIs** (Claude's is `https://claude.ai/api/mcp/auth_callback`) — skip this and Keycloak lets the user log in successfully and only *then* rejects the redirect back, which looks like a login failure but isn't one.
+3. Click into that client → **Client scopes** tab → open its `<client-id>-dedicated` scope.
+4. **Add mapper** → **By configuration** → **Audience**, then set **Included Client Audience** to that same client — this is what actually stamps the `aud` claim; without it, issued tokens carry Keycloak's default `aud` (`account`) instead, and every request fails signature-adjacent-but-audience-mismatch with a 401.
+5. Save, then confirm it worked by decoding a freshly-issued token (e.g. at jwt.io) and checking `aud` actually contains your client ID — a mapper that got saved with an empty audience field silently adds nothing, which is easy to miss.
+
+One more gotcha specific to `MCP_OAUTH_RESOURCE_URL`: it has to be an address the *client* can actually reach — if that client is Claude, it's running in Anthropic's cloud, not on your machine. Pointing this at `localhost` means the 401 response's `WWW-Authenticate` header advertises an unreachable metadata URL, so OAuth discovery silently fails. If you're tunnelling a local dev server (e.g. ngrok), this needs to be the tunnel's actual public HTTPS URL, and it changes every time a free-tier tunnel restarts. Also, if you're running this behind docker-compose, `docker compose restart` reuses the container's original environment and won't pick up an updated `.env` — use `docker compose up -d` to recreate it instead.
 
 ### 4. Run Docker Compose
 
@@ -136,7 +186,7 @@ services:
       - MCP_PORT=8080
     ports:
       - "17000:8000"   # FastAPI port (webhook, sync)
-      - "17080:8080"   # FastMCP SSE port
+      - "17080:8080"   # FastMCP Streamable HTTP port
     volumes:
       - sync_state:/data
     networks:
@@ -167,13 +217,13 @@ docker compose up -d
 
 ---
 
-## 🔗 External Client Setup Guide (HTTPS / SSE)
+## 🔗 External Client Setup Guide (HTTPS / Streamable HTTP)
 
 How to connect securely from a PC outside your home server, through an Nginx reverse proxy and an SSL certificate on your home server's domain.
 
 ### 1. Nginx reverse proxy config (required)
 
-So the SSE (Server-Sent Events) streaming FastMCP uses doesn't get cut off, make sure your domain's `proxy_pass` block maps to the RAG server's **port `17080`** and disables proxy buffering.
+So the streaming responses FastMCP's Streamable HTTP transport uses don't get cut off, make sure your domain's `proxy_pass` block maps to the RAG server's **port `17080`** and disables proxy buffering.
 
 ```nginx
 server {
@@ -187,7 +237,7 @@ server {
         # ⭐ Key part: forward to the MCP port (17080) exposed by docker-compose.
         proxy_pass http://localhost:17080;
         
-        # Required to keep the SSE connection alive in real time
+        # Required to keep the streaming connection alive in real time
         proxy_buffering off;
         proxy_cache off;
         proxy_set_header Connection '';
@@ -204,20 +254,19 @@ server {
 
 ### 2. Claude Desktop setup
 
-The MCP server won't process any request unless it carries a token registered in `.env`'s `MCP_AUTH_TOKENS` (returns 401 otherwise). In your external PC's `claude_desktop_config.json`, enter your proxied home server's HTTPS domain and path (`/sse`), passing the token as a URL query parameter (`?token=...`). Claude Desktop's `url` field can't attach custom headers, so the server accepts the token via query param as well as `Authorization: Bearer`.
+By default (`MCP_OAUTH_ENABLED` unset) the MCP server processes any request with no auth check at all — fine behind a VPN/private network, but anyone who reaches the URL directly can search your knowledge base, so put it behind something (reverse-proxy IP allowlist, VPN, etc.) if it's reachable from the open internet. In that mode, just point Claude Desktop at the URL:
 
 ```json
 {
   "mcpServers": {
     "outline-knowledge-base": {
-      "url": "https://mcp.your-domain.com/sse?token=token_for_teammate"
+      "url": "https://mcp.your-domain.com/mcp"
     }
   }
 }
-
 ```
 
-Clients that can set custom headers (e.g. `mcp-remote`) can authenticate the same way with an `Authorization: Bearer token_for_teammate` header.
+If you turn on `MCP_OAUTH_ENABLED=true` (Keycloak), Claude Desktop's remote connector discovers the server's OAuth metadata itself and walks you through a normal browser login/consent flow the first time you connect — there's no static token to paste into the config. See `docs/keycloak-reference-compose.yml` for a throwaway Keycloak realm if you want to test this locally. Clients that can't run a browser-based OAuth flow can instead send an already-issued Keycloak access token directly as an `Authorization: Bearer <token>` header.
 
 ---
 

@@ -3,6 +3,7 @@
 GOOGLE_API_KEYS      - required, comma-separated pool (key1,key2,key3)
                        falls back to GEMINI_API_KEY for a single key
 GEMINI_EMBEDDING_DIM - default: 3072 (output_dimensionality)
+GEMINI_TIMEOUT_MS    - default: 30000 (per-request timeout, milliseconds)
 
 Always uses the gemini-embedding-2 model — there's no other provider or model
 to choose, so it isn't configurable.
@@ -24,6 +25,7 @@ import os
 
 _MODEL = "gemini-embedding-2"
 _DEFAULT_DIMENSION = 3072
+_DEFAULT_TIMEOUT_MS = 30_000
 
 
 def _prepare_query(text: str) -> str:
@@ -56,10 +58,15 @@ class GeminiProvider:
             )
 
         self._types = types
+        # MCP spec (Lifecycle, "Timeouts") calls for a timeout on outbound I/O
+        # a tool handler makes — without one, a stalled Gemini call hangs the
+        # search_knowledge request forever with no way to cancel it.
+        timeout_ms = int(os.getenv("GEMINI_TIMEOUT_MS", str(_DEFAULT_TIMEOUT_MS)))
+        http_options = types.HttpOptions(timeout=timeout_ms)
         # google-genai is client-based (no global genai.configure()), so each
         # key gets its own Client up front instead of reconfiguring a
         # module-level singleton before every call.
-        self._clients = [genai.Client(api_key=key) for key in keys]
+        self._clients = [genai.Client(api_key=key, http_options=http_options) for key in keys]
         self._key_cycle = itertools.cycle(range(len(keys)))
         self._dimension = int(os.getenv("GEMINI_EMBEDDING_DIM", str(_DEFAULT_DIMENSION)))
         print(

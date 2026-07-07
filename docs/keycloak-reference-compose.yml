@@ -1,0 +1,98 @@
+# Reference only — not wired into docker-compose.yml, and not started by
+# anything in this repo. This project's MCP server never runs its own
+# authorization server; it only ever acts as an OAuth Resource Server that
+# validates a Bearer JWT against an existing Keycloak realm's JWKS endpoint
+# (see mcpserver/main.py's KeycloakTokenVerifier).
+#
+# If you don't already have a Keycloak instance and want to turn on
+# MCP_OAUTH_ENABLED, this is a minimal standalone stack you can bring up
+# separately (its own network/ports, no dependency on this project's
+# docker-compose.yml) — either for a quick local test, or as a longer-lived
+# instance on a home server:
+#
+#   docker compose -f docs/keycloak-reference-compose.yml up -d
+#
+# Reads KEYCLOAK_ADMIN_USERNAME/KEYCLOAK_ADMIN_PASSWORD from a .env file.
+# Docker Compose auto-loads a `.env` from the directory you *run* the command
+# in, not from docs/ — so either put one at the repo root (same one the main
+# stack uses is fine, these var names don't collide with it) or pass
+# `--env-file docs/.env` explicitly if you'd rather keep it colocated here.
+#
+# Then, one-time setup in the Keycloak admin console (http://localhost:8081):
+#   1. Create a realm (e.g. "outline-mcp"). A fresh realm starts with zero
+#      users of its own — the bootstrap KC_BOOTSTRAP_ADMIN_USERNAME/PASSWORD
+#      account above only exists in the built-in "master" realm and cannot
+#      log into this one. If you'll ever authenticate interactively against
+#      this realm (e.g. Claude's browser-based OAuth login, not just
+#      client_credentials), create a real user here too: Users → Create new
+#      user, then that user's Credentials tab → Set password.
+#   2. Create a client (e.g. "outline-mcp-client") — confidential or public
+#      depending on how your MCP client obtains tokens; this project doesn't
+#      care, it only verifies the signature/claims on whatever Bearer token
+#      shows up. If the client will be used for a browser-based login flow
+#      (e.g. Claude Desktop/claude.ai's custom connector), also on this
+#      client's Settings tab: enable "Standard flow", and add the OAuth
+#      caller's own callback to "Valid redirect URIs" (Claude's is
+#      `https://claude.ai/api/mcp/auth_callback`) — otherwise Keycloak lets
+#      the user log in and only then rejects the redirect back, which reads
+#      confusingly like a login failure but isn't one.
+#   3. Add an "Audience" protocol mapper on that client so issued tokens
+#      carry the `aud` claim your MCP_OAUTH_AUDIENCE expects — Keycloak
+#      doesn't populate a custom audience by default. Double-check the
+#      mapper's "Included Client/Custom Audience" field actually has a value
+#      in it once saved — an empty field silently adds nothing to `aud`.
+#   4. Point the MCP server's .env at this realm:
+#        MCP_OAUTH_ENABLED=true
+#        MCP_OAUTH_ISSUER_URL=http://localhost:8081/realms/outline-mcp
+#        MCP_OAUTH_RESOURCE_URL=https://mcp.your-domain.com/mcp
+#        MCP_OAUTH_AUDIENCE=outline-mcp-client
+#      Whatever hostname you use to actually request tokens from Keycloak
+#      must match MCP_OAUTH_ISSUER_URL exactly — Keycloak stamps the `iss`
+#      claim from the request's own Host, so mixing e.g. an internal IP for
+#      the token request with a public domain here causes a silent 401.
+#      Set KC_HOSTNAME below to pin this instead of letting it float with
+#      whatever Host header a reverse proxy happens to forward.
+#      MCP_OAUTH_RESOURCE_URL must also be an address the *client* (e.g.
+#      Claude, running in Anthropic's cloud, not on your machine) can
+#      actually reach — pointing it at localhost means the 401 response's
+#      WWW-Authenticate header advertises an unreachable metadata URL, so
+#      discovery silently fails and the client falls back to guessing
+#      endpoints. If you're tunnelling a local dev server (e.g. ngrok), this
+#      must be that tunnel's public HTTPS URL, and it changes every time a
+#      free-tier tunnel restarts — remember to update it (and restart, see
+#      below) each time.
+#      Changing anything in this .env requires recreating the container to
+#      take effect if you're running this behind docker-compose — `docker
+#      compose restart` reuses the already-created container's original
+#      environment, it does not re-read .env. Use `docker compose up -d`
+#      (recreate) instead.
+#
+# This still isn't full production hardening (dev-mode `start-dev` disables
+# some checks, and TLS is expected to be terminated by a reverse proxy in
+# front of this, not handled here) — fine for running behind your own
+# reverse proxy on a home server, but read Keycloak's own production guide
+# before exposing this more broadly.
+
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    command: start-dev
+    restart: unless-stopped
+    environment:
+      - KC_BOOTSTRAP_ADMIN_USERNAME=${KEYCLOAK_ADMIN_USERNAME}
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD}
+      # Uncomment and set to your public URL once you're proxying this
+      # (e.g. https://keycloak.your-domain.com) so `iss` stays fixed
+      # regardless of the Host header a reverse proxy forwards:
+      # - KC_HOSTNAME=https://keycloak.your-domain.com
+      # - KC_PROXY_HEADERS=xforwarded
+    ports:
+      - "8081:8080"
+    volumes:
+      # Dev mode's default H2 database file lives here — without this,
+      # every `docker compose down` (not just a restart) wipes your realm,
+      # clients, and any users you created.
+      - keycloak_data:/opt/keycloak/data
+
+volumes:
+  keycloak_data:

@@ -16,6 +16,10 @@ QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 # (service.api_key -> QDRANT__SERVICE__API_KEY) — kept identical here so
 # there's only one name for this secret across the whole stack.
 QDRANT_API_KEY = os.getenv("QDRANT__SERVICE__API_KEY")  # None → no auth (local dev)
+# MCP spec (Lifecycle, "Timeouts") calls for a timeout on outbound I/O a tool
+# handler makes — without one, a stalled Qdrant call hangs the
+# search_knowledge request forever with no way to cancel it.
+QDRANT_TIMEOUT_SECONDS = float(os.getenv("QDRANT_TIMEOUT_SECONDS", "10"))
 COLLECTION_NAME = "documents"
 
 _client: QdrantClient | None = None
@@ -24,7 +28,7 @@ _client: QdrantClient | None = None
 def get_client() -> QdrantClient:
     global _client
     if _client is None:
-        _client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+        _client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, timeout=QDRANT_TIMEOUT_SECONDS)
     return _client
 
 

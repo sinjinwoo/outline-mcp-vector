@@ -14,7 +14,7 @@ COPY mcpserver/ ./mcpserver/
 
 COPY supervisord.conf /etc/supervisord.conf
 
-# 8000: FastAPI (webhook + sync + health)   8080: MCP SSE
+# 8000: FastAPI (webhook + sync + health)   8080: MCP Streamable HTTP
 EXPOSE 8000 8080
 
 CMD ["supervisord", "-c", "/etc/supervisord.conf"]

@@ -4,11 +4,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import jwt
 import uvicorn
+from jwt import PyJWKClient
+from mcp.server.auth.provider import AccessToken, TokenVerifier
+from mcp.server.auth.settings import AuthSettings
 from mcp.server.fastmcp import FastMCP
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.responses import JSONResponse
+from mcp.server.transport_security import TransportSecuritySettings
 
 from shared.embedder import embed_query
 from shared.vector_store import search
@@ -16,9 +18,77 @@ from shared.vector_store import search
 MCP_HOST = os.getenv("MCP_HOST", "0.0.0.0")
 MCP_PORT = int(os.getenv("MCP_PORT", "8080"))
 
-# Comma-separated pool of accepted tokens, same convention as GOOGLE_API_KEYS —
-# lets you hand each client its own token and revoke individually.
-MCP_AUTH_TOKENS = {t.strip() for t in os.getenv("MCP_AUTH_TOKENS", "").split(",") if t.strip()}
+# Comma-separated allow-lists for DNS rebinding protection (MCP transport spec
+# MUST). The SDK's TransportSecuritySettings only turns itself on by default
+# when FastMCP is bound to a loopback host — this project binds 0.0.0.0 in
+# production, so without an explicit allow-list it stays silently off. Left
+# empty, protection stays disabled, since turning it on with no allowed hosts
+# would 421 every request including the real deployment's own domain.
+MCP_ALLOWED_HOSTS = {h.strip() for h in os.getenv("MCP_ALLOWED_HOSTS", "").split(",") if h.strip()}
+MCP_ALLOWED_ORIGINS = {o.strip() for o in os.getenv("MCP_ALLOWED_ORIGINS", "").split(",") if o.strip()}
+
+# Keycloak/OAuth auth is opt-in. Default is a fully open server (no auth at
+# all) — whoever deploys this decides whether to require a Keycloak-issued
+# Bearer token by setting MCP_OAUTH_ENABLED=true plus the three vars below.
+# This project never runs its own auth server; it only ever acts as an OAuth
+# Resource Server that checks a signature against Keycloak's JWKS endpoint.
+MCP_OAUTH_ENABLED = os.getenv("MCP_OAUTH_ENABLED", "false").strip().lower() == "true"
+MCP_OAUTH_ISSUER_URL = os.getenv("MCP_OAUTH_ISSUER_URL", "")
+MCP_OAUTH_RESOURCE_URL = os.getenv("MCP_OAUTH_RESOURCE_URL", "")
+MCP_OAUTH_AUDIENCE = os.getenv("MCP_OAUTH_AUDIENCE", "")
+MCP_OAUTH_JWKS_URL = os.getenv("MCP_OAUTH_JWKS_URL", "")
+
+
+class KeycloakTokenVerifier(TokenVerifier):
+    """Validates Bearer tokens as JWTs signed by an external Keycloak realm.
+
+    Resource-server-only role per the MCP Authorization spec: this project
+    never issues, stores, or introspects tokens itself — it only verifies the
+    signature against Keycloak's JWKS endpoint. PyJWKClient caches the JWKS
+    response (default 5 min) so this isn't a network round trip per request.
+    """
+
+    def __init__(self, jwks_url: str, issuer: str, audience: str) -> None:
+        self._jwks_client = PyJWKClient(jwks_url)
+        self._issuer = issuer
+        self._audience = audience
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        try:
+            signing_key = self._jwks_client.get_signing_key_from_jwt(token)
+            claims = jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=["RS256"],
+                audience=self._audience,
+                issuer=self._issuer,
+            )
+        except jwt.PyJWTError:
+            return None
+
+        return AccessToken(
+            token=token,
+            client_id=claims.get("azp") or claims.get("sub", ""),
+            scopes=claims.get("scope", "").split(),
+            expires_at=claims.get("exp"),
+            subject=claims.get("sub"),
+            claims=claims,
+        )
+
+
+def _build_oauth_settings() -> tuple[AuthSettings, KeycloakTokenVerifier]:
+    if not (MCP_OAUTH_ISSUER_URL and MCP_OAUTH_RESOURCE_URL and MCP_OAUTH_AUDIENCE):
+        raise RuntimeError(
+            "MCP_OAUTH_ENABLED=true requires MCP_OAUTH_ISSUER_URL, MCP_OAUTH_RESOURCE_URL, "
+            "and MCP_OAUTH_AUDIENCE to all be set (see .env.example)."
+        )
+    jwks_url = MCP_OAUTH_JWKS_URL or f"{MCP_OAUTH_ISSUER_URL.rstrip('/')}/protocol/openid-connect/certs"
+    verifier = KeycloakTokenVerifier(jwks_url=jwks_url, issuer=MCP_OAUTH_ISSUER_URL, audience=MCP_OAUTH_AUDIENCE)
+    auth_settings = AuthSettings(issuer_url=MCP_OAUTH_ISSUER_URL, resource_server_url=MCP_OAUTH_RESOURCE_URL)
+    return auth_settings, verifier
+
+
+_auth_settings, _token_verifier = _build_oauth_settings() if MCP_OAUTH_ENABLED else (None, None)
 
 mcp = FastMCP(
     name="RAG Knowledge Base",
@@ -28,6 +98,13 @@ mcp = FastMCP(
     ),
     host=MCP_HOST,
     port=MCP_PORT,
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=bool(MCP_ALLOWED_HOSTS),
+        allowed_hosts=list(MCP_ALLOWED_HOSTS),
+        allowed_origins=list(MCP_ALLOWED_ORIGINS),
+    ),
+    auth=_auth_settings,
+    token_verifier=_token_verifier,
 )
 
 
@@ -48,37 +125,14 @@ async def search_knowledge(query: str, limit: int = 5) -> list[dict]:
     return results
 
 
-class TokenAuthMiddleware(BaseHTTPMiddleware):
-    """Rejects any /sse or /messages request whose token isn't in MCP_AUTH_TOKENS.
-
-    Accepts the token as either an `Authorization: Bearer <token>` header or a
-    `?token=` query param — plain-`url` MCP clients (e.g. Claude Desktop) can't
-    always attach custom headers to an SSE connection, so the query param is
-    the fallback that always works.
-    """
-
-    async def dispatch(self, request: Request, call_next):
-        auth_header = request.headers.get("authorization", "")
-        token = auth_header.removeprefix("Bearer ").strip() or request.query_params.get("token", "")
-        if token not in MCP_AUTH_TOKENS:
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
-        return await call_next(request)
-
-
 def build_app():
-    if not MCP_AUTH_TOKENS:
-        raise RuntimeError(
-            "MCP_AUTH_TOKENS is not set — refusing to start an unauthenticated MCP server. "
-            "Set at least one token in .env (see .env.example)."
-        )
-    app = mcp.sse_app()
-    app.add_middleware(TokenAuthMiddleware)
-    return app
+    return mcp.streamable_http_app()
 
 
 if __name__ == "__main__":
-    # SSE-only, on purpose: this is the one transport we expose to the outside
-    # world, so instead of mcp.run(transport=...) we take the underlying
-    # Starlette app via sse_app() and serve it ourselves — that's the only way
-    # to get TokenAuthMiddleware in front of it.
+    # Streamable HTTP only, on purpose: the legacy dedicated-SSE transport
+    # (separate /sse + /messages endpoints) is deprecated MCP-spec-wide and
+    # current clients (e.g. Claude Desktop's remote connector) warn on or
+    # refuse it — Streamable HTTP's single /mcp endpoint is what they expect
+    # now.
     uvicorn.run(build_app(), host=MCP_HOST, port=MCP_PORT)
