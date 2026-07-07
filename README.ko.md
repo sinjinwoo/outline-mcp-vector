@@ -251,7 +251,7 @@ server {
 안에서만 접근 가능하다면 문제없지만, 외부에 그대로 노출된다면 URL만 알아도 지식베이스를 검색할 수 있으니
 리버스 프록시 IP 허용목록이나 VPN 등으로 앞단을 막아두세요. 이 모드에서는 그냥 URL만 등록하면 됩니다.
 
-`MCP_OAUTH_ENABLED=true`(Keycloak)로 켜두면 Claude Desktop의 원격 커넥터가 서버의 OAuth 메타데이터를 스스로 찾아내어 최초 연결 시 브라우저 로그인/동의 화면으로 안내합니다 — config에 붙여 넣을 정적 토큰이 따로 없습니다. 로컬에서 테스트해보고 싶다면 `docs/keycloak-reference-compose.yml`의 임시 Keycloak realm을 참고하세요. 브라우저 기반 OAuth 플로우를 탈 수 없는 클라이언트는 이미 발급받은 Keycloak 액세스 토큰을 `Authorization: Bearer <token>` 헤더로 직접 보내는 방식으로도 인증할 수 있습니다.
+`MCP_OAUTH_ENABLED=true`(Keycloak)로 켜두면, 커넥터 추가 화면에서 **Advanced settings → OAuth Client ID / OAuth Client Secret**을 비워두지 말고 Keycloak client 자격증명을 직접 채워 넣으세요. Claude Desktop도 이론상 서버의 OAuth 메타데이터를 스스로 찾아 Dynamic Client Registration을 시도할 수 있지만, Keycloak의 기본 "Trusted Hosts" Client Registration Policy가 낯선 호스트에서의 익명 DCR을 거부하기 때문에, 실제로는 아래 Claude Code 설정과 마찬가지로 미리 등록해둔 client가 필요합니다 (그 client의 **Valid redirect URIs**에 클로드의 콜백 `https://claude.ai/api/mcp/auth_callback`도 등록해야 함). 자격증명까지 넣고 추가하면 최초 연결 시 평범한 브라우저 로그인/동의 화면으로 안내됩니다 — config에 붙여 넣을 정적 토큰이 따로 없습니다. 로컬에서 테스트해보고 싶다면 `docs/keycloak-reference-compose.yml`의 임시 Keycloak realm을 참고하세요. 브라우저 기반 OAuth 플로우를 탈 수 없는 클라이언트는 이미 발급받은 Keycloak 액세스 토큰을 `Authorization: Bearer <token>` 헤더로 직접 보내는 방식으로도 인증할 수 있습니다.
 
 ### 3. Claude Code(CLI) 연동
 
