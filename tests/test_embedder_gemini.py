@@ -8,9 +8,10 @@ import pytest
 class FakeClient:
     """Stand-in for a google.genai.Client — one instance per API key."""
 
-    def __init__(self, fake_genai, api_key):
+    def __init__(self, fake_genai, api_key, http_options=None):
         self._fake = fake_genai
         self.api_key = api_key
+        self.http_options = http_options
         self.models = self  # client.models.embed_content(...) -> self.embed_content(...)
 
     def embed_content(self, model, contents, config):
@@ -28,8 +29,8 @@ class FakeGenAIModule(types.ModuleType):
         self.calls: list[tuple[str, str]] = []
         self.fail_keys: set[str] = set()
 
-    def Client(self, api_key):
-        return FakeClient(self, api_key)
+    def Client(self, api_key, http_options=None):
+        return FakeClient(self, api_key, http_options)
 
 
 class FakeTypesModule(types.ModuleType):
@@ -40,6 +41,9 @@ class FakeTypesModule(types.ModuleType):
 
     def EmbedContentConfig(self, output_dimensionality=None):
         return SimpleNamespace(output_dimensionality=output_dimensionality)
+
+    def HttpOptions(self, timeout=None):
+        return SimpleNamespace(timeout=timeout)
 
 
 @pytest.fixture

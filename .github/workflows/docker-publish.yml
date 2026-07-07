@@ -39,9 +39,7 @@ jobs:
           images: ${{ env.IMAGE }}
           tags: |
             type=raw,value=latest
-            type=sha,prefix=,format=short
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
 
       # 🚀 빌드 및 푸시 수행 단계
       - name: Build and push
