@@ -14,6 +14,9 @@ def make_doc(doc_id, updated_at, title="Title"):
 class FakeConnector:
     def __init__(self, docs=(), get_document_result=None):
         self._docs = list(docs)
+        # Either a single Document (used for every get_document call, as the
+        # webhook tests do) or a dict of doc_id -> Document for tests that
+        # need per-document fresh-fetch results (e.g. the sync re-fetch test).
         self._get_document_result = get_document_result
 
     async def iter_all_documents(self):
@@ -21,7 +24,14 @@ class FakeConnector:
             yield doc
 
     async def get_document(self, doc_id):
-        return self._get_document_result
+        if isinstance(self._get_document_result, dict):
+            return self._get_document_result[doc_id]
+        if self._get_document_result is not None:
+            return self._get_document_result
+        # Default: no explicit re-fetch result configured -> return the same
+        # doc that was listed, so tests that don't care about staleness see
+        # unchanged behaviour.
+        return next(doc for doc in self._docs if doc.doc_id == doc_id)
 
 
 @pytest.fixture(autouse=True)
@@ -54,6 +64,32 @@ def test_run_sync_skips_documents_not_changed_since_cursor(monkeypatch):
     assert indexed == ["new-doc"]  # old-doc unchanged since cursor -> skipped
     assert deleted == []
     assert len(set_calls) == 1  # cursor advanced after a successful run
+
+
+def test_run_sync_reindexes_freshly_fetched_content_not_listing_snapshot(monkeypatch):
+    # Simulates the race: the doc as returned by the bulk listing call is
+    # stale (e.g. Outline was edited again after the list page was fetched
+    # but before this doc's turn came up). run_sync must re-fetch the
+    # document right before indexing rather than trust the listing copy.
+    now = datetime.now(timezone.utc)
+    stale_doc = make_doc("doc-1", now, title="Stale Title")
+    fresh_doc = make_doc("doc-1", now, title="Fresh Title")
+
+    monkeypatch.setattr(tasks_module, "get_last_synced_at", lambda: None)
+    monkeypatch.setattr(tasks_module, "set_last_synced_at", lambda dt: None)
+    monkeypatch.setattr(tasks_module, "get_all_doc_ids", lambda: {"doc-1"})
+    monkeypatch.setattr(
+        tasks_module,
+        "_connector",
+        lambda: FakeConnector([stale_doc], get_document_result={"doc-1": fresh_doc}),
+    )
+    indexed = []
+    monkeypatch.setattr(tasks_module, "index_document", lambda doc: indexed.append(doc))
+    monkeypatch.setattr(tasks_module, "delete_document", lambda doc_id: None)
+
+    tasks_module.run_sync(full=False)
+
+    assert [doc.title for doc in indexed] == ["Fresh Title"]
 
 
 def test_run_sync_removes_documents_no_longer_in_outline(monkeypatch):

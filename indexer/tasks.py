@@ -89,7 +89,11 @@ def run_sync(full: bool = False) -> None:
                     continue
                 try:
                     with doc_lock(doc.doc_id):
-                        index_document(doc)
+                        # Re-fetch instead of indexing the listing snapshot: `doc`
+                        # can be stale by now, and this must win over a racing
+                        # webhook write with whatever is actually newest.
+                        fresh_doc = await connector.get_document(doc.doc_id)
+                        index_document(fresh_doc)
                     counters["indexed"] += 1
                 except Exception as exc:
                     print(f"[worker] Failed {doc.doc_id} ({doc.title}): {exc}")
