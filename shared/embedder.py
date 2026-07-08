@@ -20,12 +20,23 @@ document embeddings that went through _prepare_document; the two prefixes
 must not be swapped or dropped.
 """
 
+import base64
 import itertools
 import os
 
 _MODEL = "gemini-embedding-2"
 _DEFAULT_DIMENSION = 3072
 _DEFAULT_TIMEOUT_MS = 30_000
+
+# Gemma models are served through the same Gemini API / google-genai SDK
+# (https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api), so image
+# captioning reuses the exact same client pool/key rotation as embedding
+# instead of standing up a separate provider or local model service.
+_CAPTION_MODEL = os.getenv("GEMMA_CAPTION_MODEL", "gemma-4-26b-a4b-it")
+_CAPTION_PROMPT = (
+    "Describe this image concisely in 1-2 sentences, focusing on any text, "
+    "diagrams, or data it conveys."
+)
 
 
 def _prepare_query(text: str) -> str:
@@ -116,6 +127,25 @@ class GeminiProvider:
         # Gemini embed_content handles one text at a time; batch with a loop
         return [self._embed_one(_prepare_document(text, title)) for text in texts]
 
+    def caption_image(self, image_bytes: bytes, mime_type: str) -> str:
+        # Inline base64 image data via client.interactions.create() — no
+        # Files API upload/round-trip needed for a one-off caption call.
+        def make_request(client):
+            interaction = client.interactions.create(
+                model=_CAPTION_MODEL,
+                input=[
+                    {"type": "text", "text": _CAPTION_PROMPT},
+                    {
+                        "type": "image",
+                        "data": base64.b64encode(image_bytes).decode("utf-8"),
+                        "mime_type": mime_type,
+                    },
+                ],
+            )
+            return interaction.output_text.strip()
+
+        return self._call_with_key_rotation(make_request)
+
 
 # ---------------------------------------------------------------------------
 # Singleton factory
@@ -145,3 +175,7 @@ def embed_query(text: str) -> list[float]:
 
 def embed_passages(texts: list[str], title: str | None = None) -> list[list[float]]:
     return _get_provider().embed_passages(texts, title)
+
+
+def caption_image(image_bytes: bytes, mime_type: str) -> str:
+    return _get_provider().caption_image(image_bytes, mime_type)

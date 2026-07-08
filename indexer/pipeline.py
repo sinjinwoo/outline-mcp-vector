@@ -1,5 +1,6 @@
 from connector.base import Document
 from indexer.chunker import chunk_markdown
+from indexer.image_captions import inline_image_captions
 from shared.embedder import embed_passages, get_vector_size
 from shared.vector_store import (
     delete_by_doc_id,
@@ -16,7 +17,8 @@ def index_document(doc: Document) -> None:
     """Full indexing pipeline: chunk → embed → upsert into Qdrant."""
     _init_collection()
 
-    chunks = chunk_markdown(doc.text)
+    text = inline_image_captions(doc.text)
+    chunks = chunk_markdown(text)
     if not chunks:
         delete_by_doc_id(doc.doc_id)
         print(f"[pipeline] Deleted vectors (empty doc): {doc.title} ({doc.doc_id})")
