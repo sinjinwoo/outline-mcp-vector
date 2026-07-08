@@ -13,12 +13,19 @@ class FakeClient:
         self.api_key = api_key
         self.http_options = http_options
         self.models = self  # client.models.embed_content(...) -> self.embed_content(...)
+        self.interactions = self  # client.interactions.create(...) -> self.create(...)
 
     def embed_content(self, model, contents, config):
         self._fake.calls.append((self.api_key, contents))
         if self.api_key in self._fake.fail_keys:
             raise RuntimeError("429 rate limited")
         return SimpleNamespace(embeddings=[SimpleNamespace(values=[0.1, 0.2, 0.3])])
+
+    def create(self, model, input):
+        self._fake.caption_calls.append((self.api_key, model, input))
+        if self.api_key in self._fake.fail_keys:
+            raise RuntimeError("429 rate limited")
+        return SimpleNamespace(output_text="  A caption.  ")
 
 
 class FakeGenAIModule(types.ModuleType):
@@ -27,6 +34,7 @@ class FakeGenAIModule(types.ModuleType):
     def __init__(self):
         super().__init__("google.genai")
         self.calls: list[tuple[str, str]] = []
+        self.caption_calls: list[tuple[str, str, list]] = []
         self.fail_keys: set[str] = set()
 
     def Client(self, api_key, http_options=None):
@@ -179,3 +187,47 @@ def test_embed_passages_preserves_order(monkeypatch, fake_genai):
         "title: T | text: b",
         "title: T | text: c",
     ]
+
+
+def test_caption_image_uses_caption_model_and_strips_result(monkeypatch, fake_genai):
+    monkeypatch.setenv("GOOGLE_API_KEYS", "key1")
+    import base64
+
+    from shared.embedder import _CAPTION_MODEL, _CAPTION_PROMPT, GeminiProvider
+
+    provider = GeminiProvider()
+    caption = provider.caption_image(b"fake-bytes", "image/png")
+
+    assert caption == "A caption."
+    assert len(fake_genai.caption_calls) == 1
+    api_key, model, input_items = fake_genai.caption_calls[0]
+    assert api_key == "key1"
+    assert model == _CAPTION_MODEL
+    assert input_items[0] == {"type": "text", "text": _CAPTION_PROMPT}
+    assert input_items[1] == {
+        "type": "image",
+        "data": base64.b64encode(b"fake-bytes").decode("utf-8"),
+        "mime_type": "image/png",
+    }
+
+
+def test_caption_image_rotates_keys_on_failure(monkeypatch, fake_genai):
+    monkeypatch.setenv("GOOGLE_API_KEYS", "bad-key,good-key")
+    fake_genai.fail_keys = {"bad-key"}
+    from shared.embedder import GeminiProvider
+
+    provider = GeminiProvider()
+    caption = provider.caption_image(b"fake-bytes", "image/png")
+
+    assert caption == "A caption."
+    assert [key for key, _, _ in fake_genai.caption_calls] == ["bad-key", "good-key"]
+
+
+def test_module_level_caption_image_delegates_to_provider(monkeypatch, fake_genai):
+    monkeypatch.setenv("GOOGLE_API_KEYS", "key1")
+    import shared.embedder as embedder
+
+    embedder._provider = None  # reset the singleton so this test's env is honored
+    caption = embedder.caption_image(b"fake-bytes", "image/png")
+
+    assert caption == "A caption."

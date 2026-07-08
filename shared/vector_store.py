@@ -125,7 +125,7 @@ def search(query_embedding: list[float], limit: int = 5, offset: int = 0) -> lis
             "source": hit.payload.get("source", ""),
             "collection": hit.payload.get("collection", ""),
             "tags": hit.payload.get("tags", []),
-            "snippet": hit.payload.get("chunk_text", "")[:500],
+            "snippet": hit.payload.get("chunk_text", ""),
             "doc_id": hit.payload.get("doc_id", ""),
         }
         for hit in hits
