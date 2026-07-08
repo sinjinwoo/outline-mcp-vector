@@ -1,6 +1,24 @@
+import asyncio
 from datetime import datetime, timezone
 
+import httpx
+import pytest
+
 from connector.outline import OutlineConnector
+
+
+def _connector_with_transport(monkeypatch, handler):
+    """Build a connector whose internal httpx.AsyncClient() calls are served
+    by a MockTransport instead of hitting the network."""
+    transport = httpx.MockTransport(handler)
+
+    class _PatchedAsyncClient(httpx.AsyncClient):
+        def __init__(self, *args, **kwargs):
+            kwargs.setdefault("transport", transport)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _PatchedAsyncClient)
+    return OutlineConnector(base_url="https://outline.example.com", api_key="key")
 
 
 def make_raw_doc(**overrides):
@@ -78,3 +96,34 @@ def test_relative_doc_links_use_public_url_not_the_internal_api_url():
 
     assert doc.url == "https://outline.example.com/doc/test-doc"
     assert connector.base_url == "http://outline:3000"
+
+
+def test_check_access_succeeds_on_200(monkeypatch):
+    def handler(request):
+        return httpx.Response(200, json={"data": {"id": "doc-1"}})
+
+    connector = _connector_with_transport(monkeypatch, handler)
+
+    asyncio.run(connector.check_access("doc-1"))  # must not raise
+
+
+def test_check_access_raises_http_status_error_on_403(monkeypatch):
+    def handler(request):
+        return httpx.Response(403, json={"error": "forbidden"})
+
+    connector = _connector_with_transport(monkeypatch, handler)
+
+    with pytest.raises(httpx.HTTPStatusError) as exc_info:
+        asyncio.run(connector.check_access("doc-1"))
+    assert exc_info.value.response.status_code == 403
+
+
+def test_check_access_raises_http_status_error_on_401(monkeypatch):
+    def handler(request):
+        return httpx.Response(401, json={"error": "unauthorized"})
+
+    connector = _connector_with_transport(monkeypatch, handler)
+
+    with pytest.raises(httpx.HTTPStatusError) as exc_info:
+        asyncio.run(connector.check_access("doc-1"))
+    assert exc_info.value.response.status_code == 401

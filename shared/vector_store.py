@@ -108,12 +108,13 @@ def upsert_chunks(
         client.upsert(collection_name=COLLECTION_NAME, points=points)
 
 
-def search(query_embedding: list[float], limit: int = 5) -> list[dict]:
+def search(query_embedding: list[float], limit: int = 5, offset: int = 0) -> list[dict]:
     client = get_client()
     hits = client.search(
         collection_name=COLLECTION_NAME,
         query_vector=query_embedding,
         limit=limit,
+        offset=offset,
         with_payload=True,
     )
     return [

@@ -11,6 +11,7 @@ load_dotenv()
 
 from indexer.sync_lock import is_sync_running
 from indexer.tasks import process_webhook_event, run_sync
+from shared.sync_state import get_last_synced_at
 
 OUTLINE_WEBHOOK_SECRET = os.getenv("OUTLINE_WEBHOOK_SECRET", "")
 
@@ -67,7 +68,11 @@ async def trigger_sync(full: bool = False):
 
 @app.get("/sync/status")
 async def sync_status():
-    return {"sync_running": is_sync_running()}
+    last_synced_at = get_last_synced_at()
+    return {
+        "sync_running": is_sync_running(),
+        "last_synced_at": last_synced_at.isoformat() if last_synced_at else None,
+    }
 
 
 @app.get("/health")
