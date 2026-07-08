@@ -14,7 +14,12 @@ def _set_outline_env(monkeypatch):
 def test_image_tag_is_replaced_with_caption(monkeypatch):
     def fake_get(url, headers=None, timeout=None):
         assert url == "https://outline.example.com/api/attachments.redirect?id=abc"
-        return httpx.Response(200, content=b"fake-bytes", headers={"content-type": "image/png"})
+        return httpx.Response(
+            200,
+            content=b"fake-bytes",
+            headers={"content-type": "image/png"},
+            request=httpx.Request("GET", url),
+        )
 
     monkeypatch.setattr(image_captions.httpx, "get", fake_get)
     monkeypatch.setattr(image_captions, "caption_image", lambda data, mime: "a dashboard screenshot")
@@ -31,7 +36,12 @@ def test_same_origin_url_gets_auth_header_external_does_not(monkeypatch):
 
     def fake_get(url, headers=None, timeout=None):
         captured[url] = headers
-        return httpx.Response(200, content=b"fake-bytes", headers={"content-type": "image/jpeg"})
+        return httpx.Response(
+            200,
+            content=b"fake-bytes",
+            headers={"content-type": "image/jpeg"},
+            request=httpx.Request("GET", url),
+        )
 
     monkeypatch.setattr(image_captions.httpx, "get", fake_get)
     monkeypatch.setattr(image_captions, "caption_image", lambda data, mime: "caption")
@@ -76,7 +86,12 @@ def test_downstream_failure_does_not_affect_other_images(monkeypatch):
     def fake_get(url, headers=None, timeout=None):
         if "bad" in url:
             raise httpx.ConnectError("boom", request=httpx.Request("GET", url))
-        return httpx.Response(200, content=b"fake-bytes", headers={"content-type": "image/png"})
+        return httpx.Response(
+            200,
+            content=b"fake-bytes",
+            headers={"content-type": "image/png"},
+            request=httpx.Request("GET", url),
+        )
 
     monkeypatch.setattr(image_captions.httpx, "get", fake_get)
     monkeypatch.setattr(image_captions, "caption_image", lambda data, mime: "good caption")
