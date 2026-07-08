@@ -87,6 +87,24 @@ class OutlineConnector(Connector):
             if owns_client:
                 await client.aclose()
 
+    async def check_access(self, doc_id: str) -> None:
+        """Probe whether this connector's API key can still read doc_id.
+
+        Returns normally on success. Raises httpx.HTTPStatusError (403/404 =
+        no longer visible to this key, 401 = key itself invalid) or an httpx
+        network/timeout error on failure — callers classify the exception.
+        Deliberately skips the collection-name resolution that get_document
+        does; a permission probe doesn't need the parsed Document.
+        """
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{self.base_url}/api/documents.info",
+                headers=self.headers,
+                json={"id": doc_id},
+                timeout=10.0,
+            )
+            resp.raise_for_status()
+
     async def get_document(self, doc_id: str) -> Document:
         async with httpx.AsyncClient() as client:
             if not self._collection_names:
